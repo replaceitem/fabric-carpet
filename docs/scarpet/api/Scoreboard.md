@@ -60,7 +60,7 @@ Removes the `player` from the team he is in. Returns `true` if the player left a
 
 Removes all players inside the `team` and returns the number of people that were in the team, or `null` if the team is invalid.
 
-### `team_modify(team,property,value?)`
+### `team_property(team,property,value?)`
 
 Reads the `property` of the `team` if no `value` is specified. If a `value` is added as a third argument, it sets the `property` to that `value`.
 
@@ -100,9 +100,9 @@ The properties are the same as in `/team modify` command:
 Examples:
 
 ```
-team_modify('admin','color','dark_red')                 Make the team color for team 'admin' dark red
-team_modify('admin','prefix',format('r Admin | '))      Set prefix of all players in 'admin'
-team_modify('admin','displayName','Administrators')     Set display name for team 'admin'
-team_modify('admin','seeFriendlyInvisibles',true)       Make all players in 'admin' see other admins even when invisible
+team_property('admin','color','dark_red')                 Make the team color for team 'admin' dark red
+team_property('admin','prefix',format('r Admin | '))      Set prefix of all players in 'admin'
+team_property('admin','displayName','Administrators')     Set display name for team 'admin'
+team_property('admin','seeFriendlyInvisibles',true)       Make all players in 'admin' see other admins even when invisible
 ```
 

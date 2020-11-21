@@ -278,12 +278,12 @@ public class Scoreboards {
             return (_c, _t) -> ret;
         });
 
-        expression.addLazyFunction("team_modify", -1, (c, t, lv) ->
+        expression.addLazyFunction("team_property", -1, (c, t, lv) ->
         {
             CarpetContext cc = (CarpetContext)c;
             ServerScoreboard scoreboard = cc.s.getMinecraftServer().getScoreboard();
 
-            if(lv.size() < 2 || lv.size() > 3) throw new InternalExpressionException("'team_modify' requires two or three arguments");
+            if(lv.size() < 2 || lv.size() > 3) throw new InternalExpressionException("'team_property' requires two or three arguments");
 
             Value teamVal = lv.get(0).evalValue(c);
             Value propertyVal = lv.get(1).evalValue(c);
@@ -295,12 +295,12 @@ public class Scoreboards {
                 settingVal = lv.get(2).evalValue(c);
             }
 
-            if(!(teamVal instanceof StringValue)) throw new InternalExpressionException("'team_modify' requires a string as the first argument");
+            if(!(teamVal instanceof StringValue)) throw new InternalExpressionException("'team_property' requires a string as the first argument");
 
             Team team = scoreboard.getTeam(teamVal.getString());
             if(team == null) return LazyValue.NULL;
 
-            if(!(propertyVal instanceof StringValue)) throw new InternalExpressionException("'team_modify' requires a string as the second argument");
+            if(!(propertyVal instanceof StringValue)) throw new InternalExpressionException("'team_property' requires a string as the second argument");
 
             switch (propertyVal.getString()) {
                 case "collisionRule":
@@ -309,10 +309,10 @@ public class Scoreboards {
                         return (_c, _t) -> ret;
                     }
 
-                    if(!(settingVal instanceof StringValue)) throw  new InternalExpressionException("'team_modify' requires a string as the third argument for the property " + propertyVal.getString());
+                    if(!(settingVal instanceof StringValue)) throw  new InternalExpressionException("'team_property' requires a string as the third argument for the property " + propertyVal.getString());
 
                     AbstractTeam.CollisionRule collisionRule = AbstractTeam.CollisionRule.getRule(settingVal.getString());
-                    if(collisionRule == null) throw new InternalExpressionException("Unknown value for " + propertyVal.getString() + ": " + settingVal.getString());
+                    if(collisionRule == null) throw new InternalExpressionException("Unknown value for property " + propertyVal.getString() + ": " + settingVal.getString());
                     team.setCollisionRule(collisionRule);
                     break;
                 case "color":
@@ -321,10 +321,10 @@ public class Scoreboards {
                         return (_c, _t) -> ret;
                     }
 
-                    if(!(settingVal instanceof StringValue)) throw new InternalExpressionException("'team_modify' requires a string as the third argument for the property " + propertyVal.getString());
+                    if(!(settingVal instanceof StringValue)) throw new InternalExpressionException("'team_property' requires a string as the third argument for the property " + propertyVal.getString());
 
                     Formatting color = Formatting.byName(settingVal.getString().toUpperCase());
-                    if(color == null || !color.isColor()) throw new InternalExpressionException("Unknown value for " + propertyVal.getString() + ": " + settingVal.getString());
+                    if(color == null || !color.isColor()) throw new InternalExpressionException("Unknown value for property " + propertyVal.getString() + ": " + settingVal.getString());
                     team.setColor(color);
 
                     break;
@@ -334,10 +334,10 @@ public class Scoreboards {
                         return (_c, _t) -> ret;
                     }
 
-                    if(!(settingVal instanceof StringValue)) throw  new InternalExpressionException("'team_modify' requires a string as the third argument for the property " + propertyVal.getString());
+                    if(!(settingVal instanceof StringValue)) throw  new InternalExpressionException("'team_property' requires a string as the third argument for the property " + propertyVal.getString());
 
                     AbstractTeam.VisibilityRule deathMessageVisibility = AbstractTeam.VisibilityRule.getRule(settingVal.getString());
-                    if(deathMessageVisibility == null) throw new InternalExpressionException("Unknown value for " + propertyVal.getString() + ": " + settingVal.getString());
+                    if(deathMessageVisibility == null) throw new InternalExpressionException("Unknown value for property " + propertyVal.getString() + ": " + settingVal.getString());
                     team.setDeathMessageVisibilityRule(deathMessageVisibility);
 
                     break;
@@ -347,7 +347,7 @@ public class Scoreboards {
                         return (_c, _t) -> ret;
                     }
 
-                    if(!(settingVal instanceof StringValue)) throw  new InternalExpressionException("'team_modify' requires a string or formatted text as the third argument for the property " + propertyVal.getString());
+                    if(!(settingVal instanceof StringValue)) throw  new InternalExpressionException("'team_property' requires a string or formatted text as the third argument for the property " + propertyVal.getString());
 
                     Text displayName;
 
@@ -366,7 +366,7 @@ public class Scoreboards {
                         return (_c, _t) -> ret;
                     }
 
-                    if(!(settingVal instanceof NumericValue)) throw  new InternalExpressionException("'team_modify' requires a boolean as the third argument for the property " + propertyVal.getString());
+                    if(!(settingVal instanceof NumericValue)) throw  new InternalExpressionException("'team_property' requires a boolean as the third argument for the property " + propertyVal.getString());
 
                     boolean friendlyFire = settingVal.getBoolean();
                     team.setFriendlyFireAllowed(friendlyFire);
@@ -377,10 +377,10 @@ public class Scoreboards {
                         return (_c, _t) -> ret;
                     }
 
-                    if(!(settingVal instanceof StringValue)) throw  new InternalExpressionException("'team_modify' requires a string as the third argument for the property " + propertyVal.getString());
+                    if(!(settingVal instanceof StringValue)) throw  new InternalExpressionException("'team_property' requires a string as the third argument for the property " + propertyVal.getString());
 
                     AbstractTeam.VisibilityRule nametagVisibility = AbstractTeam.VisibilityRule.getRule(settingVal.getString());
-                    if(nametagVisibility == null) throw new InternalExpressionException("Unknown value for " + propertyVal.getString() + ": " + settingVal.getString());
+                    if(nametagVisibility == null) throw new InternalExpressionException("Unknown value for property " + propertyVal.getString() + ": " + settingVal.getString());
                     team.setNameTagVisibilityRule(nametagVisibility);
                     break;
                 case "prefix":
@@ -389,7 +389,7 @@ public class Scoreboards {
                         return (_c, _t) -> ret;
                     }
 
-                    if(!(settingVal instanceof StringValue)) throw  new InternalExpressionException("'team_modify' requires a string or formatted text as the third argument for the property " + propertyVal.getString());
+                    if(!(settingVal instanceof StringValue)) throw  new InternalExpressionException("'team_property ' requires a string or formatted text as the third argument for the property " + propertyVal.getString());
 
                     Text prefix;
 
@@ -407,7 +407,7 @@ public class Scoreboards {
                         return (_c, _t) -> ret;
                     }
 
-                    if(!(settingVal instanceof NumericValue)) throw  new InternalExpressionException("'team_modify' requires a boolean as the third argument for the property " + propertyVal.getString());
+                    if(!(settingVal instanceof NumericValue)) throw  new InternalExpressionException("'team_property' requires a boolean as the third argument for the property " + propertyVal.getString());
 
                     boolean seeFriendlyInvisibles = settingVal.getBoolean();
                     team.setShowFriendlyInvisibles(seeFriendlyInvisibles);
@@ -419,7 +419,7 @@ public class Scoreboards {
                         return (_c, _t) -> ret;
                     }
 
-                    if(!(settingVal instanceof StringValue)) throw  new InternalExpressionException("'team_modify' requires a string or formatted text as the third argument for the property " + propertyVal.getString());
+                    if(!(settingVal instanceof StringValue)) throw  new InternalExpressionException("'team_property' requires a string or formatted text as the third argument for the property " + propertyVal.getString());
 
                     Text suffix;
 
