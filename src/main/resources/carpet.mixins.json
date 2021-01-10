@@ -87,7 +87,10 @@
     "ChunkRegion_scarpetPlopMixin",
     "StructurePiece_scarpetPlopMixin",
 
+    "ServerPlayNetworkHandler_scarpetMixin",
     "ServerPlayNetworkHandler_scarpetEventsMixin",
+    "ScreenHandler_scarpetMixin",
+    "LecternScreenHandler_scarpetMixin",
     "ServerPlayerInteractionManager_scarpetEventsMixin",
     "PlayerEntity_parrotMixin",
     "SaplingBlockMixin",

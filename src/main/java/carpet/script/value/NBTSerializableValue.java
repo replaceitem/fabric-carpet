@@ -252,6 +252,11 @@ public class NBTSerializableValue extends Value implements ContainerValueInterfa
                     return null;
                 return new InventoryLocator(pos, pos, inv, offset+1);
             }
+            if(v1 instanceof ScreenHandlerValue) {
+                ScreenHandlerValue screenHandlerValue = ((ScreenHandlerValue) v1);
+                if(!screenHandlerValue.hasInventory()) throw new InternalExpressionException("Screen handler has no inventory");
+                return new InventoryLocator(null,null,screenHandlerValue.getInventory(),offset+1);
+            }
             BlockPos pos = new BlockPos(
                     NumericValue.asNumber(v1).getDouble(),
                     NumericValue.asNumber(params.get(1 + offset).evalValue(c)).getDouble(),

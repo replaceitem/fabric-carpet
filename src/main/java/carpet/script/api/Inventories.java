@@ -6,10 +6,14 @@ import carpet.script.CarpetContext;
 import carpet.script.Expression;
 import carpet.script.LazyValue;
 import carpet.script.exception.InternalExpressionException;
+import carpet.script.value.EntityValue;
+import carpet.script.value.FormattedTextValue;
+import carpet.script.value.FunctionValue;
 import carpet.script.value.ListValue;
 import carpet.script.value.NBTSerializableValue;
 import carpet.script.value.NullValue;
 import carpet.script.value.NumericValue;
+import carpet.script.value.ScreenHandlerValue;
 import carpet.script.value.StringValue;
 import carpet.script.value.Value;
 import com.google.common.collect.Sets;
@@ -32,6 +36,8 @@ import net.minecraft.recipe.ShapedRecipe;
 import net.minecraft.recipe.ShapelessRecipe;
 import net.minecraft.recipe.SpecialCraftingRecipe;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.text.LiteralText;
+import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.InvalidIdentifierException;
 import net.minecraft.util.math.Vec3d;
@@ -413,6 +419,55 @@ public class Inventories {
             }
             Value res = new NumericValue(item.getStack().getCount());
             return (_c, _t) -> res;
+        });
+
+        expression.addLazyFunction("create_screen", -1, (c, t, lv) ->
+        {
+            if(lv.size() < 2 || lv.size() > 4) throw new InternalExpressionException("'create_screen' requires between two to four arguments");
+            Value type = lv.get(0).evalValue(c);
+            Value name = lv.get(1).evalValue(c);
+
+            boolean restricted;
+
+            if(lv.size() > 2) {
+                restricted = lv.get(2).evalValue(c).getBoolean();
+            } else {
+                restricted = false;
+            }
+
+            Value function;
+            if(lv.size() == 4) {
+                function = lv.get(3).evalValue(c);
+                if(!(function instanceof FunctionValue)) throw new InternalExpressionException("Fourth argument of 'create_screen' needs to be a function");
+            } else {
+                function = null;
+            }
+
+
+            Text inventoryName;
+            if(name instanceof FormattedTextValue) {
+                inventoryName = ((FormattedTextValue) name).getText();
+            } else {
+                inventoryName = new LiteralText(name.getString());
+            }
+
+            return (_c, _t) -> new ScreenHandlerValue(type,inventoryName,restricted, (FunctionValue) function,c);
+        });
+
+        expression.addLazyFunction("show_screen", 2, (c, t, lv) ->
+        {
+            CarpetContext cc = (CarpetContext)c;
+
+            Value playerValue = lv.get(0).evalValue(c);
+            Value screenValue = lv.get(1).evalValue(c);
+
+            ServerPlayerEntity player = EntityValue.getPlayerByValue(cc.s.getMinecraftServer(),playerValue);
+            if(player == null) throw new InternalExpressionException(playerValue.getString() + " is not a valid player");
+            if(screenValue instanceof NullValue) player.closeHandledScreen();
+            if(!(screenValue instanceof ScreenHandlerValue)) throw new InternalExpressionException("'show_screen' expected a screen handler as the second argument");
+            ((ScreenHandlerValue) screenValue).showScreen(player);
+
+            return LazyValue.TRUE;
         });
     }
 
