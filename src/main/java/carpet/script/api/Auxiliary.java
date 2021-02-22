@@ -6,6 +6,7 @@ import carpet.fakes.MinecraftServerInterface;
 import carpet.fakes.StatTypeInterface;
 import carpet.fakes.ThreadedAnvilChunkStorageInterface;
 import carpet.helpers.FeatureGenerator;
+import carpet.script.bundled.Module;
 import carpet.script.CarpetContext;
 import carpet.script.CarpetEventServer;
 import carpet.script.CarpetScriptHost;
@@ -18,6 +19,8 @@ import carpet.script.argument.FunctionArgument;
 import carpet.script.argument.Vector3Argument;
 import carpet.script.exception.ExitStatement;
 import carpet.script.exception.InternalExpressionException;
+import carpet.script.utils.FixedCommandSource;
+import carpet.script.utils.ScarpetJsonDeserializer;
 import carpet.script.utils.ShapeDispatcher;
 import carpet.script.utils.WorldTools;
 import carpet.script.value.EntityValue;
@@ -33,13 +36,14 @@ import carpet.script.value.Value;
 import carpet.script.value.ValueConversions;
 import carpet.utils.Messenger;
 import net.minecraft.block.BlockState;
-import net.minecraft.command.argument.EntityAnchorArgumentType;
+import net.minecraft.command.DataCommandStorage;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.decoration.ArmorStandEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.ItemStack;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtHelper;
 import net.minecraft.nbt.StringTag;
 import net.minecraft.nbt.Tag;
@@ -48,9 +52,7 @@ import net.minecraft.network.packet.s2c.play.TitleS2CPacket;
 import net.minecraft.network.packet.s2c.play.TitleS2CPacket.Action;
 import net.minecraft.particle.ParticleEffect;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.command.CommandOutput;
 import net.minecraft.server.command.ServerCommandSource;
-import net.minecraft.server.network.ServerPlayNetworkHandler;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.sound.SoundCategory;
@@ -63,12 +65,17 @@ import net.minecraft.util.InvalidIdentifierException;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ChunkPos;
 import net.minecraft.util.math.EulerAngle;
-import net.minecraft.util.math.Vec2f;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.util.registry.DynamicRegistryManager;
 import net.minecraft.util.registry.Registry;
 import net.minecraft.world.World;
 import org.apache.commons.lang3.tuple.Pair;
+import org.apache.commons.lang3.tuple.Triple;
+
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonParseException;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -81,23 +88,39 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static carpet.script.value.NBTSerializableValue.nameFromRegistryId;
 import static java.lang.Math.max;
 import static java.lang.Math.min;
 
 public class Auxiliary {
     public static final String MARKER_STRING = "__scarpet_marker";
     private static final Map<String, SoundCategory> mixerMap = Arrays.stream(SoundCategory.values()).collect(Collectors.toMap(SoundCategory::getName, k -> k));
+    public static final Gson gson = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().registerTypeAdapter(Value.class, new ScarpetJsonDeserializer()).create();
 
-    public static String recognizeResource(Value value)
+    public static String recognizeResource(Value value, boolean isFloder)
     {
         String origfile = value.getString();
         String file = origfile.toLowerCase(Locale.ROOT).replaceAll("[^A-Za-z0-9\\-+_/]", "");
         file = Arrays.stream(file.split("/+")).filter(s -> !s.isEmpty()).collect(Collectors.joining("/"));
-        if (file.isEmpty())
+        if (file.isEmpty() && !isFloder)
         {
             throw new InternalExpressionException("Cannot use "+origfile+" as resource name - must have some letters and numbers");
         }
         return file;
+    }
+
+    public static Triple<String, String, Boolean> getFileDescriptor(List<LazyValue> lv, Context c, boolean isFloder)
+    {
+        if (lv.size() < 2) throw new InternalExpressionException("File functions require path and type as first two arguments");
+        String resource = recognizeResource(lv.get(0).evalValue(c), isFloder);
+        String origtype = lv.get(1).evalValue(c).getString().toLowerCase(Locale.ROOT);
+        boolean shared = origtype.startsWith("shared_");
+        String type = shared ? origtype.substring(7) : origtype; //len(shared_)
+        if (!Module.supportedTypes.containsKey(type))
+            throw new InternalExpressionException("Unsupported file type: "+origtype);
+        if (type.equals("folder") && !isFloder)
+            throw new InternalExpressionException("Folder types are no supported for this IO function");
+        return Triple.of(resource, type, shared);
     }
 
     public static void apply(Expression expression)
@@ -310,7 +333,7 @@ public class Auxiliary {
             {
                 Value nameValue = lv.get(0).evalValue(c);
                 name = nameValue instanceof NullValue ? "" : nameValue.getString();
-                pointLocator = Vector3Argument.findIn(cc, lv, 1, true);
+                pointLocator = Vector3Argument.findIn(cc, lv, 1, true, false);
                 if (lv.size()>pointLocator.offset)
                 {
                     BlockArgument blockLocator = BlockArgument.findIn(cc, lv, pointLocator.offset, true, true, false);
@@ -446,28 +469,29 @@ public class Auxiliary {
         {
             if (lv.size() == 0 || lv.size() > 2) throw new InternalExpressionException("'print' takes one or two arguments");
             ServerCommandSource s = ((CarpetContext)c).s;
+            MinecraftServer server = s.getMinecraftServer();
             Value res = lv.get(0).evalValue(c);
+            List<ServerPlayerEntity> targets = null;
             if (lv.size() == 2)
             {
-                ServerPlayerEntity player = EntityValue.getPlayerByValue(s.getMinecraftServer(), res);
-                if (player == null) return LazyValue.NULL;
-                s = player.getCommandSource();
+                List<Value> playerValues = (res instanceof ListValue)?((ListValue) res).getItems():Collections.singletonList(res);
+                List<ServerPlayerEntity> playerTargets = new ArrayList<>();
+                playerValues.forEach(pv -> {
+                    ServerPlayerEntity player = EntityValue.getPlayerByValue(server, pv);
+                    if (player == null) throw new InternalExpressionException("Cannot target player "+pv.getString()+" in print");
+                    playerTargets.add(player);
+                });
+                targets = playerTargets;
                 res = lv.get(1).evalValue(c);
             }
-            if (res instanceof FormattedTextValue)
+            Text message = (res instanceof FormattedTextValue)?((FormattedTextValue) res).getText():new LiteralText(res.getString());
+            if (targets == null)
             {
-                s.sendFeedback(((FormattedTextValue) res).getText(), false);
+                s.sendFeedback(message, false);
             }
             else
             {
-                if (s.getEntity() instanceof PlayerEntity)
-                {
-                    Messenger.m((PlayerEntity) s.getEntity(), "w " + res.getString());
-                }
-                else
-                {
-                    Messenger.m(s, "w " + res.getString());
-                }
+                targets.forEach(p -> p.getCommandSource().sendFeedback(message, false));
             }
             Value finalRes = res;
             return (_c, _t) -> finalRes; // pass through for variables
@@ -506,11 +530,11 @@ public class Auxiliary {
             Text title = null;
             if (lv.size() > 2)
             {
-            	pVal = lv.get(2).evalValue(c);
+                pVal = lv.get(2).evalValue(c);
                 if (pVal instanceof FormattedTextValue)
                     title = ((FormattedTextValue) pVal).getText();
                 else
-                    title = Text.of(pVal.getString());
+                    title = new LiteralText(pVal.getString());
             }
             TitleS2CPacket timesPacket;
             if (lv.size() > 3)
@@ -544,29 +568,14 @@ public class Auxiliary {
 
         expression.addLazyFunction("run", 1, (c, t, lv) -> {
             BlockPos target = ((CarpetContext)c).origin;
-            Vec3d posf = new Vec3d((double)target.getX()+0.5D,(double)target.getY(),(double)target.getZ()+0.5D);
+            Vec3d posf = new Vec3d((double)target.getX()+0.5D, target.getY(),(double)target.getZ()+0.5D);
             ServerCommandSource s = ((CarpetContext)c).s;
             try
             {
                 Value[] error = {Value.NULL};
                 List<Value> output = new ArrayList<>();
                 Value retval = new NumericValue(s.getMinecraftServer().getCommandManager().execute(
-                        new ServerCommandSource(
-                                CommandOutput.DUMMY, posf, Vec2f.ZERO, s.getWorld(), CarpetSettings.runPermissionLevel,
-                                s.getName(), s.getDisplayName(), s.getMinecraftServer(), s.getEntity(), true,
-                                (ctx, succ, res) -> { }, EntityAnchorArgumentType.EntityAnchor.FEET)
-                        {
-                            @Override
-                            public void sendError(Text message)
-                            {
-                                error[0] = new FormattedTextValue(message);
-                            }
-                            @Override
-                            public void sendFeedback(Text message, boolean broadcastToOps)
-                            {
-                                output.add(new FormattedTextValue(message));
-                            }
-                        },
+                        new FixedCommandSource(s, posf, error, output),
                         lv.get(0).evalValue(c).getString())
                 );
                 Value ret = ListValue.of(retval, ListValue.wrap(output), error[0]);
@@ -629,30 +638,40 @@ public class Auxiliary {
 
 
         expression.addLazyFunction("game_tick", -1, (c, t, lv) -> {
-            ServerCommandSource s = ((CarpetContext)c).s;
+            CarpetContext cc = (CarpetContext)c;
+            ServerCommandSource s = cc.s;
             if (!s.getMinecraftServer().isOnThread()) throw new InternalExpressionException("Unable to run ticks from threads");
-            ((MinecraftServerInterface)s.getMinecraftServer()).forceTick( () -> System.nanoTime()- CarpetServer.scriptServer.tickStart<50000000L);
-            if (lv.size()>0)
+            if (CarpetServer.scriptServer.tickDepth > 16) throw new InternalExpressionException("'game_tick' function caused other 'game_tick' functions to run. You should not allow that.");
+            try
             {
-                long ms_total = NumericValue.asNumber(lv.get(0).evalValue(c)).getLong();
-                long end_expected = CarpetServer.scriptServer.tickStart+ms_total*1000000L;
-                long wait = end_expected-System.nanoTime();
-                if (wait > 0L)
+                CarpetServer.scriptServer.tickDepth ++;
+                ((MinecraftServerInterface) s.getMinecraftServer()).forceTick(() -> System.nanoTime() - CarpetServer.scriptServer.tickStart < 50000000L);
+                if (lv.size() > 0)
                 {
-                    try
+                    long ms_total = NumericValue.asNumber(lv.get(0).evalValue(c)).getLong();
+                    long end_expected = CarpetServer.scriptServer.tickStart + ms_total * 1000000L;
+                    long wait = end_expected - System.nanoTime();
+                    if (wait > 0L)
                     {
-                        Thread.sleep(wait/1000000L);
-                    }
-                    catch (InterruptedException ignored)
-                    {
+                        try
+                        {
+                            Thread.sleep(wait / 1000000L);
+                        }
+                        catch (InterruptedException ignored)
+                        {
+                        }
                     }
                 }
+                CarpetServer.scriptServer.tickStart = System.nanoTime(); // for the next tick
+                Thread.yield();
             }
-            CarpetServer.scriptServer.tickStart = System.nanoTime(); // for the next tick
-            Thread.yield();
+            finally
+            {
+                CarpetServer.scriptServer.tickDepth --;
+            }
             if(CarpetServer.scriptServer.stopAll)
                 throw new ExitStatement(Value.NULL);
-            return (cc, tt) -> Value.TRUE;
+            return (_c, _t) -> Value.TRUE;
         });
 
         expression.addLazyFunction("seed", -1, (c, t, lv) -> {
@@ -785,23 +804,49 @@ public class Auxiliary {
             return (_c, _t) -> res; // pass through for variables
         });
 
-        expression.addLazyFunction("read_file", 2, (c, t, lv) -> {
-            String resource = recognizeResource(lv.get(0).evalValue(c));
-            String origtype = lv.get(1).evalValue(c).getString().toLowerCase(Locale.ROOT);
-            boolean shared = origtype.startsWith("shared_");
-            String type = shared ? origtype.substring(7) : origtype; //len(shared_)
-            if (!type.equals("raw") && !type.equals("text") && !type.equals("nbt"))
-                throw new InternalExpressionException("Unsupported file type: "+origtype);
+        expression.addLazyFunction("list_files", 2, (c, t, lv) ->
+        {
+            Triple<String, String, Boolean> fdesc = getFileDescriptor(lv, c, true);
+            Stream<String> files = ((CarpetScriptHost) c.host).listFolder(fdesc.getLeft(), fdesc.getMiddle(), fdesc.getRight());
+            if (files == null) return LazyValue.NULL;
+            Value ret = ListValue.wrap(files.map(StringValue::of).collect(Collectors.toList()));
+            return (cc, tt) -> ret;
+        });
+
+
+        expression.addLazyFunction("read_file", 2, (c, t, lv) ->
+        {
+            Triple<String, String, Boolean> fdesc = getFileDescriptor(lv, c, false);
             Value retVal;
-            if (type.equals("nbt"))
+            if (fdesc.getMiddle().equals("nbt"))
             {
-                Tag state = ((CarpetScriptHost)((CarpetContext)c).host).readFileTag(resource, shared);
+                Tag state = ((CarpetScriptHost) c.host).readFileTag(fdesc.getLeft(), fdesc.getRight());
                 if (state == null) return LazyValue.NULL;
                 retVal = new NBTSerializableValue(state);
             }
+            else if (fdesc.getMiddle().equals("json"))
+            {
+                JsonElement json;
+                try
+                {
+                    json = ((CarpetScriptHost) c.host).readJsonFile(fdesc.getLeft(), fdesc.getMiddle(), fdesc.getRight());
+                }
+                catch (JsonParseException e)
+                {
+                    Throwable exception = e;
+                    if(e.getCause() != null)
+                        exception = e.getCause();
+                    throw new InternalExpressionException("Failed to read JSON file: "+exception.getMessage());
+                }
+                Value parsedJson = gson.fromJson(json, Value.class);
+                if (parsedJson == null)
+                    retVal = Value.NULL;
+                else
+                    retVal = parsedJson;
+            }
             else
             {
-                List<String> content = ((CarpetScriptHost) ((CarpetContext) c).host).readTextResource(resource, shared);
+                List<String> content = ((CarpetScriptHost) c.host).readTextResource(fdesc.getLeft(), fdesc.getMiddle(), fdesc.getRight());
                 if (content == null) return LazyValue.NULL;
                 retVal = ListValue.wrap(content.stream().map(StringValue::new).collect(Collectors.toList()));
             }
@@ -809,33 +854,32 @@ public class Auxiliary {
         });
 
         expression.addLazyFunction("delete_file", 2, (c, t, lv) -> {
-            String resource = recognizeResource(lv.get(0).evalValue(c));
-            String origtype = lv.get(1).evalValue(c).getString().toLowerCase(Locale.ROOT);
-            boolean shared = origtype.startsWith("shared_");
-            String type = shared ? origtype.substring(7) : origtype; //len(shared_)
-            if (!type.equals("raw") && !type.equals("text") && !type.equals("nbt"))
-                throw new InternalExpressionException("Unsupported file type: "+origtype);
-            boolean success = ((CarpetScriptHost)((CarpetContext)c).host).removeResourceFile(resource, shared, type);
-            return success?LazyValue.TRUE:LazyValue.FALSE;
+            Triple<String, String, Boolean> fdesc = getFileDescriptor(lv, c, false);
+            return ((CarpetScriptHost) c.host).removeResourceFile(fdesc.getLeft(), fdesc.getRight(), fdesc.getMiddle())
+                    ? LazyValue.TRUE
+                    : LazyValue.FALSE;
         });
 
         expression.addLazyFunction("write_file", -1, (c, t, lv) -> {
             if (lv.size() < 3) throw new InternalExpressionException("'write_file' requires three or more arguments");
-            String resource = recognizeResource(lv.get(0).evalValue(c));
-            String origtype = lv.get(1).evalValue(c).getString().toLowerCase(Locale.ROOT);
-            boolean shared = origtype.startsWith("shared_");
-            String type = shared ? origtype.substring(7) : origtype; //len(shared_)
-            if (!type.equals("raw") && !type.equals("text") && !type.equals("nbt"))
-                throw new InternalExpressionException("Unsupported file type: "+origtype);
+            Triple<String, String, Boolean> fdesc = getFileDescriptor(lv, c, false);
+
+
             boolean success;
-            if (type.equals("nbt"))
+            if (fdesc.getMiddle().equals("nbt"))
             {
                 Value val = lv.get(2).evalValue(c);
                 NBTSerializableValue tagValue =  (val instanceof NBTSerializableValue)
                         ? (NBTSerializableValue) val
                         : new NBTSerializableValue(val.getString());
                 Tag tag = tagValue.getTag();
-                success = ((CarpetScriptHost)((CarpetContext)c).host).writeTagFile(tag, resource, shared);
+                success = ((CarpetScriptHost) c.host).writeTagFile(tag, fdesc.getLeft(), fdesc.getRight());
+            }
+            else if (fdesc.getMiddle().equals("json"))
+            {
+                List<String> data = Collections.singletonList(gson.toJson(lv.get(2).evalValue(c).toJson()));
+                ((CarpetScriptHost) c.host).removeResourceFile(fdesc.getLeft(), fdesc.getRight(), fdesc.getMiddle());
+                success = ((CarpetScriptHost) c.host).appendLogFile(fdesc.getLeft(), fdesc.getRight(), fdesc.getMiddle(), data);
             }
             else
             {
@@ -860,7 +904,7 @@ public class Auxiliary {
                         data.add(lv.get(i).evalValue(c).getString());
                     }
                 }
-                success = ((CarpetScriptHost) ((CarpetContext) c).host).appendLogFile(resource, shared, type, data);
+                success = ((CarpetScriptHost) c.host).appendLogFile(fdesc.getLeft(), fdesc.getRight(), fdesc.getMiddle(), data);
             }
             return success?LazyValue.TRUE:LazyValue.FALSE;
         });
@@ -874,7 +918,7 @@ public class Auxiliary {
             if (lv.size()>0)
             {
                 c.host.issueDeprecation("load_app_data(...) with arguments");
-                file = recognizeResource(lv.get(0).evalValue(c));
+                file = recognizeResource(lv.get(0).evalValue(c), false);
                 if (lv.size() > 1)
                 {
                     shared = lv.get(1).evalValue(c).getBoolean();
@@ -897,7 +941,7 @@ public class Auxiliary {
             if (lv.size()>1)
             {
                 c.host.issueDeprecation("store_app_data(...) with more than one argument");
-                file = recognizeResource(lv.get(1).evalValue(c));
+                file = recognizeResource(lv.get(1).evalValue(c), false);
                 if (lv.size() > 2)
                 {
                     shared = lv.get(2).evalValue(c).getBoolean();
@@ -961,6 +1005,7 @@ public class Auxiliary {
         {
             if (lv.size() == 0)
                 throw new InternalExpressionException("'signal' requires at least one argument");
+            CarpetContext cc = (CarpetContext)c;
             CarpetScriptServer server = ((CarpetScriptHost)c.host).getScriptServer();
             String eventName = lv.get(0).evalValue(c).getString();
             // no such event yet
@@ -975,10 +1020,33 @@ public class Auxiliary {
                     args = FunctionValue.resolveArgs(lv.subList(2, lv.size()), c, t);
                 }
             }
-            int counts = ((CarpetScriptHost)c.host).getScriptServer().events.signalEvent(eventName, (CarpetScriptHost) c.host, player, args);
+            int counts = ((CarpetScriptHost)c.host).getScriptServer().events.signalEvent(eventName, cc, player, args);
             if (counts < 0) return LazyValue.NULL;
             Value ret = new NumericValue(counts);
-            return (cc, tt) -> ret;
+            return (c_, t_) -> ret;
+        });
+
+        // nbt_storage()
+        // nbt_storage(key)
+        // nbt_storage(key, nbt)
+        expression.addLazyFunction("nbt_storage", -1, (c, t, lv) -> {
+            if (lv.size() > 2) throw new InternalExpressionException("'nbt_storage' requires 0, 1 or 2 arguments.");
+            CarpetContext cc = (CarpetContext) c;
+            DataCommandStorage storage = cc.s.getMinecraftServer().getDataCommandStorage();
+            if (lv.size() == 0) {
+                Value ret = ListValue.wrap(storage.getIds().map(i -> new StringValue(nameFromRegistryId(i))).collect(Collectors.toList()));
+                return (_c, _t) -> ret;
+            }
+            String key = lv.get(0).evalValue(c).getString();
+            CompoundTag old_nbt = storage.get(new Identifier(key));
+            if (lv.size() == 2) {
+                Value nbt = lv.get(1).evalValue(c);
+                NBTSerializableValue new_nbt = (nbt instanceof NBTSerializableValue) ? (NBTSerializableValue) nbt
+                        : NBTSerializableValue.parseString(nbt.getString(), true);
+                storage.set(new Identifier(key), new_nbt.getCompoundTag());
+            }
+            if (old_nbt == null) return LazyValue.NULL;
+            return (_c, _t) -> new NBTSerializableValue(old_nbt);
         });
     }
 

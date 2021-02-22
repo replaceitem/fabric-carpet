@@ -7,19 +7,25 @@ import carpet.settings.Validator;
 import carpet.utils.Translations;
 import carpet.utils.Messenger;
 import carpet.utils.SpawnChunks;
+import net.minecraft.block.Block;
+import net.minecraft.block.Blocks;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.dedicated.DedicatedServer;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.ChunkPos;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.util.registry.Registry;
 import net.minecraft.world.World;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.util.Iterator;
 import java.util.Locale;
+import java.util.Optional;
 
 import static carpet.settings.RuleCategory.BUGFIX;
 import static carpet.settings.RuleCategory.COMMAND;
@@ -36,7 +42,7 @@ import static carpet.settings.RuleCategory.CLIENT;
 @SuppressWarnings("CanBeFinal")
 public class CarpetSettings
 {
-    public static final String carpetVersion = "1.4.19+v201125";
+    public static final String carpetVersion = "1.4.27+v210217";
     public static final Logger LOG = LogManager.getLogger("carpet");
     public static boolean skipGenerationChecks = false;
     public static boolean impendingFillSkipUpdates = false;
@@ -45,6 +51,8 @@ public class CarpetSettings
     public static int runPermissionLevel = 2;
     public static boolean doChainStone = false;
     public static boolean chainStoneStickToAll = false;
+    public static Block structureBlockIgnoredBlock = Blocks.STRUCTURE_VOID;
+    public static final int vanillaStructureBlockLimit = 48;
 
     private static class LanguageValidator extends Validator<String> {
         @Override public String validate(ServerCommandSource source, ParsedRule<String> currentRule, String newValue, String string) {
@@ -427,7 +435,7 @@ public class CarpetSettings
             extra = "if /script is enabled",
             category = SCARPET
     )
-    public static boolean scriptsAutoload = false;
+    public static boolean scriptsAutoload = true;
 
     @Rule(desc = "Enables /player command to control/spawn players", category = COMMAND)
     public static String commandPlayer = "ops";
@@ -638,6 +646,58 @@ public class CarpetSettings
     )
     public static int spawnChunksSize = 11;
 
+    public static class LightBatchValidator extends Validator<Integer> {
+        public static void applyLightBatchSizes()
+        {
+            Iterator<ServerWorld> iterator = CarpetServer.minecraft_server.getWorlds().iterator();
+            
+            while (iterator.hasNext()) 
+            {
+                ServerWorld serverWorld = iterator.next();
+                serverWorld.getChunkManager().getLightingProvider().setTaskBatchSize(lightEngineMaxBatchSize);
+            }
+        }
+        @Override public Integer validate(ServerCommandSource source, ParsedRule<Integer> currentRule, Integer newValue, String string) {
+            if (source == null) return newValue;
+            if (newValue < 0)
+            {
+                Messenger.m(source, "r light batch size has to be at least 0");
+                return null;
+            }
+            if (currentRule.get().intValue() == newValue.intValue())
+            {
+                //must been some startup thing
+                return newValue;
+            }
+            if (CarpetServer.minecraft_server == null) return newValue;
+          
+            // Set the field before we apply.
+            try
+            {
+                currentRule.field.set(null, newValue.intValue());
+            }
+            catch (IllegalAccessException e)
+            {
+                Messenger.m(source, "r Unable to access setting for  "+currentRule.name);
+                return null;
+            }
+            
+            applyLightBatchSizes(); // Apply new settings
+            
+            return newValue;
+        }
+    }
+    
+    @Rule(
+            desc = "Changes maximum light tasks batch size",
+            extra = {"Allows for a higher light suppression tolerance", "setting it to 5 - Default limit defined by the game"},
+            category = {EXPERIMENTAL, OPTIMIZATION},
+            strict = false,
+            options = {"5", "50", "100", "200"},
+            validate = LightBatchValidator.class
+    )
+    public static int lightEngineMaxBatchSize = 5;
+    
     @Rule(desc = "Coral structures will grow with bonemeal from coral plants", category = FEATURE)
     public static boolean renewableCoral = false;
 
@@ -739,4 +799,69 @@ public class CarpetSettings
             category = {SURVIVAL, CLIENT}
     )
     public static boolean cleanLogs = false;
+
+    public static class StructureBlockLimitValidator extends Validator<Integer> {
+
+        @Override public Integer validate(ServerCommandSource source, ParsedRule<Integer> currentRule, Integer newValue, String string) {
+            return (newValue >= vanillaStructureBlockLimit) ? newValue : null;
+        }
+
+        @Override
+        public String description() {
+            return "You have to choose a value greater or equal to 48";
+        }
+    }
+    @Rule(
+            desc = "Customizable structure block limit of each axis",
+            extra = {"WARNING: Needs to be permanent for correct loading.",
+                    "Setting 'structureBlockIgnored' to air is recommended",
+                    "when saving massive structures.",
+                    "Required on client of player editing the Structure Block.",
+                    "'structureBlockOutlineDistance' may be required for",
+                    "correct rendering of long structures."},
+            options = {"48", "96", "192", "256"},
+            category = CREATIVE,
+            validate = StructureBlockLimitValidator.class,
+            strict = false
+    )
+    public static int structureBlockLimit = vanillaStructureBlockLimit;
+
+    public static class StructureBlockIgnoredValidator extends Validator<String> {
+
+        @Override
+        public String validate(ServerCommandSource source, ParsedRule<String> currentRule, String newValue, String string) {
+            Optional<Block> ignoredBlock = Registry.BLOCK.getOrEmpty(Identifier.tryParse(newValue));
+            if (!ignoredBlock.isPresent()) {
+                Messenger.m(source, "r Unknown block '" + newValue + "'.");
+                return null;
+            }
+            structureBlockIgnoredBlock = ignoredBlock.get();
+            return newValue;
+        }
+    }
+    @Rule(
+            desc = "Changes the block ignored by the Structure Block",
+            options = {"minecraft:structure_void", "minecraft:air"},
+            category = CREATIVE,
+            validate = StructureBlockIgnoredValidator.class,
+            strict = false
+    )
+    public static String structureBlockIgnored = "minecraft:structure_void";
+
+    @Rule(
+            desc = "Customizable Structure Block outline render distance",
+            extra = "Required on client to work properly",
+            options = {"96", "192", "2048"},
+            category = {CREATIVE, CLIENT},
+            strict = false,
+            validate = Validator.NONNEGATIVE_NUMBER.class
+    )
+    public static double structureBlockOutlineDistance = 96d;
+
+    @Rule(
+            desc = "Lightning kills the items that drop when lightning kills an entity",
+            extra = {"Setting to true will prevent lightning from killing drops", "Fixes [MC-206922](https://bugs.mojang.com/browse/MC-206922)."},
+            category = {BUGFIX}
+    )
+    public static boolean lightningKillsDropsFix = false;
 }

@@ -151,9 +151,10 @@ have memory and act like objects so to speak. Check `outer(var)` for details.
 ## Code delivery, line indicators
 
 Note that this should only apply to pasting your code to execute with commandblock. Scarpet recommends placing 
-your code in apps (files with `.sc` extension that can be placed inside "/scripts" folder in the world files and 
-loaded as a scarpet app with command `/script load [app_name]`. Scarpet apps loaded from disk should only 
-contain code, no need to start with "/script run" prefix
+your code in apps (files with `.sc` extension that can be placed inside `/scripts` folder in the world files 
+or as a globally available app in singleplayer in the `.minecraft/config/carpet/scripts` folder and loaded 
+as a Scarpet app with the command `/script load [app_name]`. Scarpet apps loaded from disk should only 
+contain code, no need to start with `/script run` prefix.
 
 The following is the code that could be provided in a `foo.sc` app file located in world `/scripts` folder
 
@@ -803,6 +804,9 @@ a = 3; task_thread('temp', _(outer(a), b) -> foo(a,b), 5)
     => Another example of running the same thing passing arguments using closure over anonymous function as well as passing a parameter.
 </pre>
 
+In case you want to create a task based on a function that is not defined in your module, please read the tips on
+ "Passing function references to other modules of your application" section in the `call(...)` section.
+
 ### `sleep()` `sleep(timeout)`, `sleep(timeout, close_expr)`
 
 
@@ -1372,7 +1376,7 @@ foo(... x) -> ...  # all arguments for foo are included in the list
 ### `import(module_name, symbols ...)`
 
 Imports symbols from other apps and libraries into the current one: global variables or functions, allowing to use 
-them in the current app. This include other symbols imported by these modules. Scarpet supports cicular dependencies, 
+them in the current app. This includes other symbols imported by these modules. Scarpet supports circular dependencies, 
 but if symbols are used directly in the module body rather than functions, it may not be able to retrieve them. 
 Returns full list of available symbols that could be imported from this module, which can be used to debug import 
 issues, and list contents of libraries.
@@ -1381,8 +1385,56 @@ issues, and list contents of libraries.
 
 calls a user defined function with specified arguments. It is equivalent to calling `function(args...)` directly 
 except you can use it with function value, or name instead. This means you can pass functions to other user defined 
-functions as arguments and call them with `call` internally. And since function definitions return the defined 
+functions as arguments and call them with `call` internally. Since function definitions return the defined 
 function, they can be defined in place as anonymous functions.
+
+#### Passing function references to other modules of your application
+
+In case a function is defined by its name, Scarpet will attempt to resolve its definition in the given module and its imports,
+meaning if the call is in a imported library, and not in the main module of your app, and that function is not visible from the
+library perspective, but in the app, it won't be call-able. In case you pass a function name to a separate module in your app, 
+it should import back that method from the main module for visibility. 
+
+Check an example of a problematic code of a library that expects a function value as a passed argument and how it is called in
+the parent app:
+```
+//app.sc
+import('lib', 'callme');
+foo(x) -> x*x;
+test() -> callme('foo' , 5);
+```
+```
+//lib.scl
+callme(fun, arg) -> call(fun, arg);
+```
+
+In this case `'foo'` will fail to dereference in `lib` as it is not visible by name. In tightly coupled modules, where `lib` is just
+a component of your `app` you can use circular import to acknowledge the symbol from the other module (pretty much like
+imports in Java classes), and that solves the issue but makes the library dependent on the main app: 
+```
+//lib.scl
+import('app','foo');
+callme(fun, arg) -> call(fun, arg);
+```
+You can circumvent that issue by explicitly dereferencing the local function where it is used as a lambda argument created 
+in the module in which the requested function is visible:
+```
+//app.sc
+import('lib', 'callme');
+foo(x) -> x*x;
+test() -> callme(_(x) -> foo(x), 5);
+```
+```
+//lib.scl
+callme(fun, arg) -> call(fun, arg);
+```
+Or by passing an explicit reference to the function, instead of calling it by name:
+```
+//app.sc
+import('lib', 'callme');
+global_foohandler = (foo(x) -> x*x);
+test() -> callme(global_foohandler, 5);
+```
 
 Little technical note: the use of `_` in expression passed to built in functions is much more efficient due to not 
 creating new call stacks for each invoked function, but anonymous functions is the only mechanism available for 
@@ -1603,24 +1655,39 @@ join('-', 'foo', 'bar')  => foo-bar
 Splits a string under `expr` by `delim` which can be a regular expression. If no delimiter is specified, it splits
 by characters.
 
+If `expr` is a list, it will split the list into multiple sublists by the element (s) which equal `delim`, or which equal the empty string
+in case no delimiter is specified.
+
+Splitting a `null` value will return an empty list.
+
 <pre>
 split('foo') => [f, o, o]
 split('','foo')  => [f, o, o]
 split('.','foo.bar')  => []
 split('\\.','foo.bar')  => [foo, bar]
+split(1,[2,5,1,2,3,1,5,6]) => [[2,5],[2,3],[5,6]]
+split(1,[1,2,3,1,4,5,1] => [[], [2,3], [4,5], []]
+split(null) => []
 </pre>
 
 ### `slice(expr, from, to?)`
 
 extracts a substring, or sublist (based on the type of the result of the expression under expr with 
-starting index of `from`, and ending at `to` if provided, or the end, if omitted
+starting index of `from`, and ending at `to` if provided, or the end, if omitted. Can use negative indices to 
+indicate counting form the back of the list, so `-1 <=> length(_)`.
+
+Special case is made for iterators (`range`, `rect` etc), which does require non-negative indices (negative `from` is treated as
+`0`, and negative `to` as `inf`), but allows retrieving parts of the sequence and ignore
+other parts. In that case consecutive calls to `slice` will refer to index `0` the current iteration position since iterators
+cannot go back nor track where they are in the sequence (see examples).
 
 <pre>
-slice(l(0,1,2,3,4,5), 1, 3)  => [1, 2, 3]
+slice([0,1,2,3,4,5], 1, 3)  => [1, 2, 3]
 slice('foobar', 0, 1)  => 'f'
 slice('foobar', 3)  => 'bar'
 slice(range(10), 3, 5)  => [3, 4, 5]
 slice(range(10), 5)  => [5, 6, 7, 8, 9]
+r = range(100); [slice(r, 5, 7), slice(r, 1, 3)]  => [[5, 6], [8, 9]]
 </pre>
 
 ### `sort(list), sort(values ...)`
@@ -1658,6 +1725,8 @@ map(range(10),_*_)  => [0, 1, 4, 9, 16, 25, 36, 49, 64, 81]
 reduce(range(10),_a+_, 0)  => 45
 range(5,10)  => [5, 6, 7, 8, 9]
 range(20, 10, -2)  => [20, 18, 16, 14, 12]
+range(-0.3, 0.3, 0.1)  => [-0.3, -0.2, -0.1, 0, 0.1, 0.2]
+range(0.3, -0.3, -0.1) => [0.3, 0.2, 0.1, -0, -0.1, -0.2]
 </pre>
 
 ## Map operations
@@ -1705,10 +1774,17 @@ Here is the gist of the Minecraft related functions. Otherwise the CarpetScript 
 ## App structure
 
 The main delivery method for scarpet programs into the game is in the form of apps in `*.sc` files located in the world `scripts` 
-folder. When loaded (via `/script load` command, etc.), the game will run the content of the app once, regardless of its scope
+folder, flat. In singleplayer, you can also save apps in `.minecraft/config/carpet/scripts` for them to be available in any world,
+and here you can actually organize them in folders. 
+When loaded (via `/script load` command, etc.), the game will run the content of the app once, regardless of its scope
 (more about the app scopes below), without executing of any functions, unless called directly, and with the exception of the
 `__config()` function, if present, which will be executed once. Loading the app will also bind specific 
 events to the event system (check Events section for details).
+ 
+If an app defines `__on_start()` function, it will be executed once before running anything else. For global scoped apps,
+this is just after they are loaded, and for player scoped apps, before they are used first time by a player.
+Unlike static code (written directly in the body of the app code), that always run once per app, this may run multiple times if
+its a player app nd multiple players are on the server. 
  
 Unloading an app removes all of its state from the game, disables commands, removes bounded events, and 
 saves its global state. If more cleanup is needed, one can define `__on_close()` function which will be 
@@ -1731,15 +1807,14 @@ the app state and all players interactions run in the same context, sharing defi
 explicitly keyed with players, player names, uuids, etc.
 Even for `'player'` scoped apps, you can access specific player app with with commandblocks using
 `/execute as <player> run script in <app> run ...`.
-To access global/server state for a player app, you need to disown the command from any player, 
+To access global/server state for a player app, which you shouldn't do, you need to disown the command from any player, 
 so either use a command block, or any 
 arbitrary entity: `/execute as @e[type=bat,limit=1] run script in <app> globals` for instance, however
-running anything in the global scope for a `'player'` scoped app is not recommended.
-*   `'stay_loaded'`: defaults to `false`. If true, and `/carpet scriptsAutoload` is turned on, the following apps will 
+running anything in the global scope for a `'player'` scoped app is not intended.
+*   `'stay_loaded'`: defaults to `true`. If true, and `/carpet scriptsAutoload` is turned on, the following apps will 
 stay loaded after startup. Otherwise, after reading the app the first time, and fetching the config, server will drop them down. 
-This is to allow to store multiple apps on the server/world and selectively decide which one should be running at 
-startup. WARNING: all apps will run once at startup anyways, so be aware that their actions that are called 
-statically, will be performed once anyways.
+ WARNING: all apps will run once at startup anyways, so be aware that their actions that are called 
+statically, will be performed once anyways. Only apps present in the world's `scripts` folder will be autoloaded.
 *   `'legacy_command_type_support'` - if `true`, and the app defines the legacy command system via `__command()` function,
 all parameters of command functions will be interpreted and used using brigadier / vanilla style argument parser and their type
 will be inferred from their names, otherwise
@@ -1749,9 +1824,20 @@ conflicts and ambiguities between different paths of execution. While ambiguous 
 and they tend to execute correctly, the suggestion support works really poorly in these situations and scarpet
 will warn and prevent such apps from loading with an error message. If `allow_command_conflicts` is specified and 
 `true`, then scarpet will load all provided commands regardless.
+*   `'command_permission'` - indicates a custom permission to run the command. It can either be a number indicating 
+permission level (from 1 to 4) or a string value, one of: `'all'` (default), `'ops'` (default opped player with permission level of 2),
+`'server'` - command accessible only through the server console and commandblocks, but not in chat, `'players'` - opposite
+of the former, allowing only use in player chat. It can also be a function (lambda function or function value, not function name)
+that takes 1 parameter, which represents the calling player, or `'null'` if the command represents a server call. 
+The function will prevent the command from running if it evaluates to `false`.
+Please note, that Minecraft evaluates eligible commands for players when they join, or on reload/restart, so if you use a 
+predicate that is volatile and might change, the command might falsely do or do not indicate that it is available to the player,
+however player will always be able to type it in and either succeed, or fail, based on their current permissions.
+Custom permission applies to legacy commands with `'legacy_command_type_support'` as well
+as for the custom commands defined with `'commands'`, see below.
 *   `'arguments'` - defines custom argument types for legacy commands with `'legacy_command_type_support'` as well
-as for the custom commands defined with `'commands'`, see below
-*   `'commands'` - defines custom commands for the app to be executed with `/<app>` command, see below
+as for the custom commands defined with `'commands'`, see below.
+*   `'commands'` - defines custom commands for the app to be executed with `/<app>` command, see below.
 
 ## Custom app commands
 
@@ -1904,6 +1990,20 @@ Here is a list of built-in types, with their return value formats, as well as a 
   * `'pos'`: block position as a triple of coordinates. Customized with `'loaded'`, if true requiring the position 
   to be loaded.
   * `'block'`: a valid block state wrapped in a block value (including block properties and data)
+  * `'blockpredicate`': returns a 4-tuple indicating conditions of a block to match: block name, block tag,
+  map of required state properties, and tag to match. Either block name or block tag are `null` but not both.
+  Property map is always specified, but its empty for no conditions, and matching nbt tag can be `null` indicating
+  no requirements. Technically the 'all-matching' predicate would be `[null, null, {}, null]`, but 
+  block name or block tag is always specified. One can use the following routine to match a block agains this predicate:
+  ```
+    block_to_match = block(x,y,z);
+    [block_name, block_tag, properties, nbt_tag] = block_predicate;
+   
+    (block_name == null || block_name == block_to_match) &&
+    (block_tag == null || block_tags(block_to_match, block_tag)) &&
+    all(properties, block_state(block_to_match, _) == properties:_) &&
+    (!tag || tag_matches(block_data(block_to_match), tag))
+  ```
   * `'teamcolor'`: name of a team, and an integer color value of one of 16 valid team colors.
   * `'columnpos'`: a pair of x and z coordinates.
   * `'dimension'`: string representing a valid dimension in the world.
@@ -1913,6 +2013,11 @@ Here is a list of built-in types, with their return value formats, as well as a 
   * `'players'`: returning a list of valid player name string, logged in or not. If configured with `'single'` returns only one player or `null`.
   * `'intrange'`: same as `'floatrange'`, but requiring integers. 
   * `'enchantment'`: name of an enchantment
+  * `'slot'`: provides a list of inventory type and slot. Can be configured with `'restrict'` requiring
+   `'player'`, `'enderchest'`, `'equipment'`, `'armor'`, `'weapon'`, `'container'`, `'villager'` or `'horse'` restricting selection of 
+   available slots. Scarpet supports all vanilla slots, except for `horse.chest` - chest item, not items themselves. This you would
+   need to manage yourself via nbt directly. Also, for entities that change their capacity, like llamas, you need to check yourself if
+   the specified container slot is valid for your entity.
   * `'item'`: triple of item type, count of 1, and nbt.
   * `'message'`: text with expanded embedded player names 
   * `'effect'`: string representing a status effect
@@ -1987,18 +2092,19 @@ print(b); // 'stone', block was evaluated 'eagerly' but call to `block`
 All the functions below can be used with block value, queried with coord triple, or 3-long list. All `pos` in the 
 functions referenced below refer to either method of passing block position.
 
-### `set(pos, block, property?, value?, ..., block_data?)`, `set(pos, block, l(property?, value?, ...), block_data?)`
+### `set(pos, block, property?, value?, ..., block_data?)`, `set(pos, block, [property?, value?, ...], block_data?)`, `set(pos, block, {property? -> value?, ...}, block_data?)`
 
-First part of the `set` function is either a coord triple, list of three numbers, or other block with coordinates. 
-Second part, `block` is either block value as a result of `block()` function string value indicating the block name, 
-and optional `property - value` pairs for extra block properties. Optional `block_data` include the block data to 
+First argument for the `set` function is either a coord triple, list of three numbers, or a world localized block value. 
+Second argument, `block`, is either an existing block value, a result of `block()` function, or a string value indicating the block name
+with optional state and block data. It is then followed by an optional 
+`property - value` pairs for extra block state (which can also be provided in a list or a map). Optional `block_data` include the block data to 
 be set for the target block.
 
 If `block` is specified only by name, then if a 
 destination block is the same the `set` operation is skipped, otherwise is executed, for other potential extra
-properties.
+properties that the original source block may have contained.
 
-The returned value is either the block state that has been set, or `false` if block setting was skipped
+The returned value is either the block state that has been set, or `false` if block setting was skipped, or failed
 
 <pre>
 set(0,5,0,'bedrock')  => bedrock
@@ -2014,11 +2120,15 @@ scan(0,100,0,20,20,20,set(_,block('glass')))
 b = block('glass'); scan(0,100,0,20,20,20,set(_,b))
     // yet another option, skips all parsing
 set(x,y,z,'iron_trapdoor')  // sets bottom iron trapdoor
-set(x,y,z,'iron_trapdoor[half=top]')  // Incorrect. sets bottom iron trapdoor - no parsing of properties
-set(x,y,z,'iron_trapdoor','half','top') // correct - top trapdoor
-set(x,y,z, block('iron_trapdoor[half=top]')) // also correct, block() provides extra parsing
+
+set(x,y,z,'iron_trapdoor[half=top]')  // sets the top trapdoor
+set(x,y,z,'iron_trapdoor','half','top') // also correct - top trapdoor
+set(x,y,z,'iron_trapdoor', ['half','top']) // same
+set(x,y,z,'iron_trapdoor', {'half' -> 'top'}) // same
+set(x,y,z, block('iron_trapdoor[half=top]')) // also correct, block() provides extra parsing of block state
+
 set(x,y,z,'hopper[facing=north]{Items:[{Slot:1b,id:"minecraft:slime_ball",Count:16b}]}') // extra block data
-set(x,y,z,'hopper', l('facing', 'north'), nbt('{Items:[{Slot:1b,id:"minecraft:slime_ball",Count:16b}]}') ) // same
+set(x,y,z,'hopper', {'facing' -> 'north'}, nbt('{Items:[{Slot:1b,id:"minecraft:slime_ball",Count:16b}]}') ) // same
 </pre>
 
 ### `without_updates(expr)`
@@ -2163,6 +2273,16 @@ Causes a block to be harvested by a specified player entity. Honors player item 
 tool if applicable. If the entity is not a valid player, no block gets destroyed. If a player is not allowed to break 
 that block, a block doesn't get destroyed either.
 
+### `weather()`,`weather(type)`,`weather(type, ticks)`
+
+If called with no args, returns `'clear'`, `'rain` or `'thunder'` based on the current weather. If thundering, will
+always return `'thunder'`, if not will return `'rain'` or `'clear'` based on the current weather.
+
+With one arg, (either `'clear'`, `'rain` or `'thunder'`), returns the number of remaining ticks for that weather type.
+NB: It can thunder without there being a thunderstorm, there has to be both rain and thunder to form a storm.
+
+With two args, sets the weather to `type` for `ticks` ticks.
+
 ## Block and World querying
 
 ### `pos(block), pos(entity)`
@@ -2199,20 +2319,33 @@ Deprecated by `block_state(pos, name)`
 If used with a `block` argument only, it returns a map of block properties and their values.  If a block has no properties, returns an
 empty map.
 
-If `property` is specified, returns value of that property, or `null` if property is not applicable.
+If `property` is specified, returns a string value of that property, or `null` if property is not applicable.
 
 Returned values or properties are always strings. It is expected from the user to know what to expect and convert 
 values to numbers using `number()` function or booleans using `bool()` function. Returned string values can be directly used
 back in state definition in various applications where block properties are required.
 
+`block_state` can also accept block names as input, returning block's default state.
+
 <pre>
 set(x,y,z,'iron_trapdoor','half','top'); block_state(x,y,z)  => {waterlogged: false, half: top, open: false, ...}
 set(x,y,z,'iron_trapdoor','half','top'); block_state(x,y,z,'half')  => top
+block_state('iron_trapdoor','half')  => top
 set(x,y,z,'air'); block_state(x,y,z,'half')  => null
 block_state(block('iron_trapdoor[half=top]'),'half')  => top
 block_state(block('iron_trapdoor[half=top]'),'powered')  => false
 bool(block_state(block('iron_trapdoor[half=top]'),'powered'))  => 0
 </pre>
+
+### `block_list()`, `block_list(tag)`
+
+Returns list of all blocks. If tag is provided, returns list of blocks that belong to this block tag.
+
+### `block_tags()`, `block_tags(block)`, `block_tags(block, tag)`
+
+Without arguments, returns list of available tags, with block supplied (either by coordinates, or via block name), returns lost
+of tags the block belongs to, and if a tag is specified, returns `null` if tag is invalid, `false` if this block doesn't belong 
+to this tag, and `true` if the block belongs to the tag.
 
 ### `block_data(pos)`
 
@@ -2244,9 +2377,32 @@ poi(x,y,z,5) => []  // nothing around
 poi(x,y,z,5) => [['nether_portal',0,[7,8,9]],['nether_portal',0,[7,9,9]]] // two portal blocks in the range
 </pre>
 
-### `biome(pos)`
+### `biome()` `biome(name)` `biome(block)` `biome(block/name, feature)`
 
-Returns the biome at that block position.
+Without arguments, returns the list of biomes in the world.
+
+With block, or name, returns the name of the biome in that position, or null, if provided biome is not valid. 
+
+With an optional feature, it returns value for the specified attribute for that biome. Available and querable features include:
+* `'top_material'`: unlocalized block representing the top surface material
+* `'under_material'`: unlocalized block representing what sits below topsoil
+* `'category'`: the parent biome this biome is derived from. Possible values include:
+`'none'`, `'taiga'`, `'extreme_hills'`, `'jungle'`, `'mesa'`, `'plains'`, `'savanna'`,
+`'icy'`, `'the_end'`, `'beach'`, `'forest'`, `'ocean'`, `'desert'`, `'river'`,
+`'swamp'`, `'mushroom'` and  `'nether'`.
+* `'temperature'`: temperature from 0 to 1
+* `'fog_color'`: RGBA color value of fog 
+* `'foliage_color'`: RGBA color value of foliage
+* `'sky_color'`: RGBA color value of sky
+* `'water_color'`: RGBA color value of water
+* `'water_fog_color'`: RGBA color value of water fog
+* `'humidity'`: value from 0 to 1 indicating how wet is the biome
+* `'precipitation'`: `'rain'` `'snot'`, or `'none'`... ok, maybe `'snow'`, but that means snots for sure as well.
+* `'depth'`: float value indicating how high or low the terrain should generate. Values > 0 indicate generation above sea level
+and values < 0, below sea level.
+* `'scale'`: float value indicating how flat is the terrain.
+* `'features'`: list of features that generate in the biome, grouped by generation steps
+* `'structures'`: list of structures that generate in the biome.
 
 ### `solid(pos)`
 
@@ -2455,9 +2611,12 @@ This function is tentative - will likely change when chunk ticket API is properl
 Scarpet provides convenient methods to access and modify information about structures as well as spawn in-game
 structures and features. List of available options and names that you can use depends mostly if you are using scarpet
 with minecraft 1.16.1 and below or 1.16.2 and above since in 1.16.2 Mojang has added JSON support for worldgen features
-meaning that since 1.16.2 - they have official names that can be used by datapacks and scarpet
+meaning that since 1.16.2 - they have official names that can be used by datapacks and scarpet. If you have most recent
+scarpet on 1.16.4, you can use `plop()` to get all available worldgen features including custom features and structures
+controlled by datapacks. It returns a map of lists in the following categories: 
+`'scarpet_custom'`, `'configured_features'`, `'structures'`, `'features'`, `'configured_structures'`
 
-### Previous Structure Names, including variants (as of MC 1.16.3)
+### Previous Structure Names, including variants (MC1.16.1 and below)
 *   `'monument'`: Ocean Monument. Generates at fixed Y coordinate, surrounds itself with water.
 *   `'fortress'`: Nether Fortress. Altitude varies, but its bounded by the code.
 *   `'mansion'`: Woodland Mansion
@@ -2487,7 +2646,7 @@ meaning that since 1.16.2 - they have official names that can be used by datapac
 *   `'bastion_remnant_treasure'`: Treasure room version of a piglin bastion (1.16)
 *   `'bastion_remnant_bridge'` : Bridge version of a piglin bastion (1.16)
 
-### Feature Names (as of mc1.16.1) 
+### Feature Names (1.16.1 and below) 
 
 *   `'oak'`
 *   `'oak_beehive'`: oak with a hive (1.15+).
@@ -2551,13 +2710,17 @@ meaning that since 1.16.2 - they have official names that can be used by datapac
 *   `'twisting_vines'` (1.16)
 *   `'basalt_pillar'` (1.16)
 
-### Standard Structures (as of 1.16.2+)
+### Standard Structures (as of MC1.16.2+)
+
+Use `plop():'structures'`, but it always returns the following:
 
 `'bastion_remnant'`, `'buried_treasure'`, `'desert_pyramid'`, `'endcity'`, `'fortress'`, `'igloo'`, 
 `'jungle_pyramid'`, `'mansion'`, `'mineshaft'`, `'monument'`, `'nether_fossil'`, `'ocean_ruin'`, 
 `'pillager_outpost'`, `'ruined_portal'`, `'shipwreck'`, `'stronghold'`, `'swamp_hut'`, `'village'`
 
-### Structure Variants (as of 1.16.2+)
+### Structure Variants (as of MC1.16.2+)
+
+Use `plop():'configured_structures'`, but it always returns the following:
 
 `'bastion_remnant'`, `'buried_treasure'`, `'desert_pyramid'`, `'end_city'`, `'fortress'`, `'igloo'`, 
 `'jungle_pyramid'`, `'mansion'`, `'mineshaft'`, `'mineshaft_mesa'`, `'monument'`, `'nether_fossil'`,
@@ -2566,48 +2729,16 @@ meaning that since 1.16.2 - they have official names that can be used by datapac
 `'ruined_portal_swamp'`, `'shipwreck'`, `'shipwreck_beached'`, `'stronghold'`, `'swamp_hut'`, 
 `'village_desert'`, `'village_plains'`, `'village_savanna'`, `'village_snovy'`, `'village_taiga'`
 
-### World Generation Features (as of 1.16.2+)
+### World Generation Features (as of MC1.16.2+)
 
-`'acacia'`, `'amethyst_geode'` (1.17+), `'bamboo'`, `'bamboo_light'`, `'bamboo_vegetation'`, `'basalt_blobs'`, `'basalt_pillar'`, 
-`'birch'`, `'birch_bees_0002'`, `'birch_bees_002'`, `'birch_bees_005'`, `'birch_other'`, `'birch_tall'`, 
-`'blackstone_blobs'`, `'blue_ice'`, `'bonus_chest'`, `'brown_mushroom_giant'`, `'brown_mushroom_nether'`,
-`'brown_mushroom_normal'`, `'brown_mushroom_swamp'`, `'brown_mushroom_taiga'`, `'chorus_plant'`, 
-`'crimson_forest_vegetation'`, `'crimson_fungi'`, `'crimson_fungi_planted'`, `'dark_forest_vegetation_brown'`, 
-`'dark_forest_vegetation_red'`, `'dark_oak'`, `'delta'`, `'desert_well'`, `'disk_clay'`, `'disk_gravel'`, 
-`'disk_sand'`, `'end_gateway'`, `'end_gateway_delayed'`, `'end_island'`, `'end_island_decorated'`, `'end_spike'`, 
-`'fancy_oak'`, `'fancy_oak_bees_0002'`, `'fancy_oak_bees_002'`, `'fancy_oak_bees_005'`, `'flower_default'`, 
-`'flower_forest'`, `'flower_plain'`, `'flower_plain_decorated'`, `'flower_swamp'`, `'flower_warm'`, 
-`'forest_flower_trees'`, `'forest_flower_vegetation'`, `'forest_flower_vegetation_common'`, `'forest_rock'`, 
-`'fossil'`, `'freeze_top_layer'`, `'glowstone'`, `'glowstone_extra'`, `'huge_brown_mushroom'`, 
-`'huge_red_mushroom'`, `'ice_patch'`, `'ice_spike'`, `'iceberg_blue'`, `'iceberg_packed'`, `'jungle_bush'`,
-`'jungle_tree'`, `'jungle_tree_no_vine'`, `'kelp_cold'`, `'kelp_warm'`, `'lake_lava'`, `'lake_water'`, 
-`'large_basalt_columns'`, `'mega_jungle_tree'`, `'mega_pine'`, `'mega_spruce'`, `'monster_room'`, 
-`'mushroom_field_vegetation'`, `'nether_sprouts'`, `'nope'`, `'oak'`, `'oak_badlands'`, `'oak_bees_0002'`, 
-`'oak_bees_002'`, `'oak_bees_005'`, `'ore_andesite'`, `'ore_blackstone'`, `'ore_coal'`, `'ore_debris_large'`,
-`'ore_debris_small'`, `'ore_diamond'`, `'ore_diorite'`, `'ore_dirt'`, `'ore_emerald'`, `'ore_gold'`, 
-`'ore_gold_deltas'`, `'ore_gold_extra'`, `'ore_gold_nether'`, `'ore_granite'`, `'ore_gravel'`, 
-`'ore_gravel_nether'`, `'ore_infested'`, `'ore_iron'`, `'ore_lapis'`, `'ore_magma'`, `'ore_quartz_deltas'`, 
-`'ore_quartz_nether'`, `'ore_redstone'`, `'ore_soul_sand'`, `'patch_berry_bush'`, `'patch_berry_decorated'`, 
-`'patch_berry_sparse'`, `'patch_brown_mushroom'`, `'patch_cactus'`, `'patch_cactus_decorated'`, 
-`'patch_cactus_desert'`, `'patch_crimson_roots'`, `'patch_dead_bush'`, `'patch_dead_bush_2'`, 
-`'patch_dead_bush_badlands'`, `'patch_fire'`, `'patch_grass_badlands'`, `'patch_grass_forest'`, 
-`'patch_grass_jungle'`, `'patch_grass_normal'`, `'patch_grass_plain'`, `'patch_grass_savanna'`, 
-`'patch_grass_taiga'`, `'patch_grass_taiga_2'`, `'patch_large_fern'`, `'patch_melon'`, `'patch_pumpkin'`, 
-`'patch_red_mushroom'`, `'patch_soul_fire'`, `'patch_sugar_cane'`, `'patch_sugar_cane_badlands'`, 
-`'patch_sugar_cane_desert'`, `'patch_sugar_cane_swamp'`, `'patch_sunflower'`, `'patch_taiga_grass'`, 
-`'patch_tall_grass'`, `'patch_tall_grass_2'`, `'patch_waterlilly'`, `'pile_hay'`, `'pile_ice'`, 
-`'pile_melon'`, `'pile_pumpkin'`, `'pile_snow'`, `'pine'`, `'plain_vegetation'`, `'red_mushroom_giant'`,
-`'red_mushroom_nether'`, `'red_mushroom_normal'`, `'red_mushroom_swamp'`, `'red_mushroom_taiga'`, 
-`'sea_pickle'`, `'seagrass_cold'`, `'seagrass_deep'`, `'seagrass_deep_cold'`, `'seagrass_deep_warm'`, 
-`'seagrass_normal'`, `'seagrass_river'`, `'seagrass_simple'`, `'seagrass_swamp'`, `'seagrass_warm'`, 
-`'small_basalt_columns'`, `'spring_closed'`, `'spring_closed_double'`, `'spring_delta'`, `'spring_lava'`, 
-`'spring_lava_double'`, `'spring_open'`, `'spring_water'`, `'spruce'`, `'spruce_snovy'`, `'super_birch_bees_0002'`, 
-`'swamp_tree'`, `'taiga_vegetation'`, `'trees_giant'`, `'trees_giant_spruce'`, `'trees_jungle'`, 
-`'trees_jungle_edge'`, `'trees_mountain'`, `'trees_mountain_edge'`, `'trees_savanna'`, `'trees_shattered_savanna'`, 
-`'trees_water'`, `'twisting_vines'`, `'vines'`, `'void_start_platform'`, `'warm_ocean_vegetation'`, 
-`'warped_forest_vegetation'`, `'warped_fungi'`, `'warped_fungi_planted'`, `'weeping_vines'`
+Use `plop():'features'` and `plop():'configured_features'` for a list of available options. Your output may vary based on
+datapacks installed in your world.
 
-### Custom Scarpet Features (1.16.2+)
+### Custom Scarpet Features
+
+Use `plop():'scarpet_custom'` for a full list.
+
+These contain some popular features and structures that are impossible or difficult to obtain with vanilla structures/features.
 
 * `'bastion_remnant_bridge'` - Bridge version of a bastion remnant
 * `'bastion_remnant_hoglin_stable'` - Hoglin stables version of a bastion remnant
@@ -2633,7 +2764,7 @@ making it preferred for scoping ungenerated terrain, but it takes some compute r
 Unlike `'structure'` this will return a tentative structure location. Random factors in world generation may prevent
 the actual structure from forming.
   
-If structure is specified, it will return `null` if a chunk is not eligible, `true` if the structure should appear, or 
+If structure is specified, it will return `null` if a chunk is not eligible or invalid, `true` if the structure should appear, or 
 a map with two values: `'box'` for a pair of coordinates indicating bounding box of the structure, and `'pieces'` for 
 list of elements of the structure (as a tuple), with its name, direction, and box coordinates of the piece.
 
@@ -2650,7 +2781,7 @@ the first case it returns a map of structures at a given position, keyed by stru
 the bounding box of the structure - a pair of two 3-value coords (see examples). When called with an extra structure 
 name, returns a map with two values, `'box'` for bounding box of the structure, and `'pieces'` for a list of 
 components for that structure, with their name, direction and two sets of coordinates 
-indicating the bounding box of the structure piece.
+indicating the bounding box of the structure piece. If structure is invalid, its data will be `null`.
 
 Requires a `Standard Structure` name (see above).
 
@@ -2722,14 +2853,16 @@ the future.
 
 These functions help scan larger areas of blocks without using generic loop functions, like nested `loop`.
 
-### `scan(center, range, lower_range?, expr)`
+### `scan(center, range, upper_range?, expr)`
 
 Evaluates expression over area of blocks defined by its center `center = (cx, cy, cz)`, expanded in all directions 
 by `range = (dx, dy, dz)` blocks, or optionally in negative with `range` coords, and `upper_range` coords in 
-positive values.
-`center` can be defined either as three coordinates, a list of three coords, or a block value.
-`range` and `lower_range` can have the same representations, just if its a block, it computes the distance to the center
+positive values, so you can use that if you know the lower coord, and dimension by calling `'scan(center, 0, 0, 0, w, h, d, ...)`.
+
+`center` can be defined either as three coordinates, a single tuple of three coords, or a block value.
+`range` and `upper_range` can have the same representations, just if they are block values, it computes the distance to the center
 as range instead of taking the values as is.
+
 `expr` receives `_x, _y, _z` as coords of current analyzed block and `_`, which represents the block itself.
 
 Returns number of successful evaluations of `expr` (with `true` boolean result) unless called in void context, 
@@ -2754,7 +2887,7 @@ Returns the list of 6 neighbouring blocks to the argument. Commonly used with ot
 for(neighbours(x,y,z),air(_)) => 4 // number of air blocks around a block
 </pre>
 
-### `rect(centre, range?, positive_range?)`
+### `rect(centre, range?, upper_range?)`
 
 Returns an iterator, just like `range` function that iterates over a rectangular area of blocks. If only center
 point is specified, it iterates over 27 blocks. If `range` arguments are specified, expands selection by the  respective 
@@ -2762,7 +2895,7 @@ number of blocks in each direction. If `positive_range` arguments are specified,
  it uses `range` for negative offset, and `positive_range` for positive.
 
 `centre` can be defined either as three coordinates, a list of three coords, or a block value.
-`range` and `positive_range` can have the same representations, just if its a block, it computes the distance to the center
+`range` and `positive_range` can have the same representations, just if they are block values, it computes the distance to the center
 as range instead of taking the values as is.`
 
 ### `diamond(centre_pos, radius?, height?)`
@@ -2780,7 +2913,10 @@ In this case - entities would need to be re-fetched, or the code should account 
 
 ### `player(), player(type), player(name)`
 
-With no arguments, it returns the calling player or the player closest to the caller. Note that the main context 
+With no arguments, it returns the calling player or the player closest to the caller. 
+For player-scoped apps (which is a default) its always the owning player or `null` if it not present even if some code
+still runs in their name.
+Note that the main context 
 will receive `p` variable pointing to this player. With `type` or `name` specified, it will try first to match a type, 
 returning a list of players matching a type, and if this fails, will assume its player name query retuning player with 
 that name, or `null` if no player was found. With `'all'`, list of all players in the game, in all dimensions, so end 
@@ -2824,7 +2960,9 @@ to the `regular` group.
 *  `monster`, `creature`, `ambient`, `water_creature`, `water_ambient`, `misc` - another categorization of 
 living entities based on their spawn group. Negative descriptor resolves to all living types that don't belong to that
 category.
-*  Any of the following standard entity types (equivalent to selection from `/summon` vanilla command: 
+* All entity tags including those provided with datapacks. Built-in entity tags include: `skeletons`, `raiders`, 
+`beehive_inhabitors` (bee, duh), `arrows` and `impact_projectiles`.
+* Any of the following standard entity types (equivalent to selection from `/summon` vanilla command: 
 `area_effect_cloud`, `armor_stand`, `arrow`, `bat`, `bee`, `blaze`, `boat`, `cat`, `cave_spider`, `chest_minecart`, 
 `chicken`, `cod`, `command_block_minecart`, `cow`, `creeper`, `dolphin`, `donkey`, `dragon_fireball`, `drowned`, 
 `egg`, `elder_guardian`, `end_crystal`, `ender_dragon`, `ender_pearl`, `enderman`, `endermite`, `evoker`, 
@@ -2846,10 +2984,13 @@ belonging to that group.
 
  
 Returns entities of a specified type in an area centered on `center` and at most `distance` blocks away from 
-the center point. Uses the same `type` selectors as `entities_list`.
+the center point/area. Uses the same `type` selectors as `entities_list`.
 
 `center` and `distance` can either be a triple of coordinates or three consecutive arguments for `entity_area`. `center` can 
-also be represented as a block, in this case the search box will be centered on the middle of the block.
+also be represented as a block, in this case the search box will be centered on the middle of the block, or an entity - in this case
+entire bounding box of the entity serves as a 'center' of search which is then expanded in all directions with the `'distance'` vector.
+
+In any case - returns all entities which bounding box collides with the bounding box defined by `'center'` and `'disteance'`.
 
 entity_area is simpler than `entity_selector` and runs about 20% faster, but is limited to predefined selectors and 
 cuboid search area.
@@ -2978,13 +3119,21 @@ List of entities riding the entity.
 
 Entity that `e` rides.
 
-### `query(e, 'tags')`
+###  `query(e, 'scoreboard_tags')`, `query(e, 'tags')`(deprecated)
 
-List of entity's tags.
+List of entity's scoreboard tags.
 
-### `query(e, 'has_tag',tag)`
+### `query(e, 'has_scoreboard_tag',tag)`, `query(e, 'has_tag',tag)`(deprecated)
 
-Boolean, true if the entity is marked with `tag`.
+Boolean, true if the entity is marked with a `tag` scoreboad tag.
+
+### `query(e, 'entity_tags')`
+
+List of entity tags assigned to the type this entity represents.
+
+### `query(e, 'has_entity_tag', tag)`
+
+Returns `true` if the entity matches that entity tag, `false` if it doesn't, and `null` if the tag is not valid. 
 
 ### `query(e, 'is_burning')`
 
@@ -3001,6 +3150,10 @@ Boolean, true if the entity is silent.
 ### `query(e, 'gravity')`
 
 Boolean, true if the entity is affected by gravity, like most entities are.
+
+### `query(e, 'invulnerable')`
+
+Boolean, true if the entity is invulnerable.
 
 ### `query(e, 'immune_to_fire')`
 
@@ -3103,6 +3256,11 @@ Boolean, true if the entity is swimming.
 
 Boolean, true if the entity is jumping.
 
+### `query(e, 'swinging')`
+
+Returns `true` if the entity is actively swinging their hand, `false` if not and `null` if swinging is not applicable to
+that entity.
+
 ### `query(e, 'gamemode')`
 
 String with gamemode, or `null` if not a player.
@@ -3138,6 +3296,11 @@ Player's ping in milliseconds, or `null` if its not a player.
 
 Player's permission level, or `null` if not applicable for this entity.
 
+### `query(e, 'client_brand')`
+
+Returns recognized type of client of the client connected. Possible results include `'vanilla'`, or `'carpet <version>'` where 
+version indicates the version of the connected carpet client. 
+
 ### `query(e, 'effect', name?)`
 
 Without extra arguments, it returns list of effect active on a living entity. Each entry is a triple of short 
@@ -3159,6 +3322,18 @@ Number indicating remaining entity health, or `null` if not applicable.
 ### `query(e, 'exhaustion')`
 
 Retrieves player hunger related information. For non-players, returns `null`.
+
+### `query(e, 'absorption')`
+
+Gets the absorption of the player (yellow hearts, e.g when having a golden apple.)
+
+### `query(e,'xp')`
+### `query(e,'xp_level')`
+### `query(e,'xp_progress')`
+### `query(e,'score')`
+
+Numbers related to player's xp. `xp` is the overall xp player has, `xp_level` is the levels seen in the hotbar,
+`xp_progress` is a float between 0 and 1 indicating the percentage of the xp bar filled, and `score` is the number displayed upon death 
 
 ### `query(e, 'air')`
 
@@ -3413,10 +3588,10 @@ If called with `false` value, it will disable AI in the mob. `true` will enable 
 Sets if the entity obeys any collisions, including collisions with the terrain and basic physics. Not affecting 
 players, since they are controlled client side.
 
-### `modify(e, 'effect', name?, duration?, amplifier?, show_particles?, show_icon?)`
+### `modify(e, 'effect', name?, duration?, amplifier?, show_particles?, show_icon?, ambient?)`
 
-Applies status effect to the living entity. Takes several optional parameters, which default to `0`, `true` 
-and `true`. If no duration is specified, or if it's null or 0, the effect is removed. If name is not specified,
+Applies status effect to the living entity. Takes several optional parameters, which default to `0`, `true`, 
+`true` and `false`. If no duration is specified, or if it's null or 0, the effect is removed. If name is not specified,
 it clears all effects.
 
 ### `modify(e, 'home', null), modify(e, 'home', block, distance?), modify(e, 'home', x, y, z, distance?)`
@@ -3460,6 +3635,10 @@ Silences or unsilences the entity.
 
 Toggles gravity for the entity.
 
+### `modify(e, 'invulnerable', boolean)`
+
+Toggles invulnerability for the entity.
+
 ### `modify(e, 'fire', ticks)`
 
 Will set entity on fire for `ticks` ticks. Set to 0 to extinguish.
@@ -3469,6 +3648,20 @@ Will set entity on fire for `ticks` ticks. Set to 0 to extinguish.
 ### `modify(e, 'exhaustion', value)`
 
 Modifies directly player raw hunger components. Has no effect on non-players
+
+### `modify(e, 'absorption', value)`
+
+Sets the absorption value for the player. Each point is half a yellow heart.
+
+### `modify(e, 'add_xp', value)`
+### `modify(e, 'xp_level', value)`
+### `modify(e, 'xp_progress', value)`
+### `modify(e, 'xp_score', value)` 
+
+Manipulates player xp values - `'add_xp'` the method you probably want to use 
+to manipulate how much 'xp' an action should give. `'xp_score'` only affects the number you see when you die, and 
+`'xp_progress'` controls the xp progressbar above the hotbar, should take values from 0 to 1, but you can set it to any value, 
+maybe you will get a double, who knows.
 
 ### `modify(e, 'air', ticks)`
 
@@ -3512,6 +3705,10 @@ Required arguments: `entity, amount, source, attacking_entity`
 
 It doesn't mean that all entity types will have a chance to execute a given event, but entities will not error 
 when you attach an inapplicable event to it.
+
+In case you want to pass an event handler that is not defined in your module, please read the tips on
+ "Passing function references to other modules of your application" section in the `call(...)` section.
+
 
 ### `entity_load_handler(descriptor / descriptors, function)`, `entity_load_handler(descriptor / descriptors, call_name, ... args?)`
 
@@ -3586,17 +3783,38 @@ health back to the villager after being harmed.
 ## Manipulating inventories of blocks and entities
 
 Most functions in this category require inventory as the first argument. Inventory could be specified by an entity, 
-or a block, or position (three coordinates) of a potential block with inventory. Player enderchest inventory require 
-two arguments, keyword `'enderchest'`, followed by the player entity argument, or a single argument as a string of a
-form: `'enderchest_steve'`. If your player name starts with enderchest, it can be always accessed by passing a player
+or a block, or position (three coordinates) of a potential block with inventory, or can be preceded with inventory
+type.
+Inventory type can be `null` (default), `'enderchest'` denoting player enderchest storage, or `'equipment'` applying to 
+entities hand and armour pieces. Then the type can be followed by entity, block or position coordinates.
+For instance, player enderchest inventory requires 
+two arguments, keyword `'enderchest'`, followed by the player entity argument, (or a single argument as a string of a
+form: `'enderchest_steve'` for legacy support). If your player name starts with `'enderchest_'`, first of all, tough luck, 
+but then it can be always accessed by passing a player
 entity value. If all else fails, it will try to identify first three arguments as coordinates of a block position of
-a block inventory. Player inventories can also be called by their name.
+a block inventory. Player inventories can also be called by their name. 
+
+A few living entities can have both: their regular inventory, and their equipment inventory. 
+Player's regular inventory already contains the equipment, but you can access the equipment part as well, as well as 
+their enderchest separately. For entity types that only have
+their equipment inventory, the equipment is returned by default (`null` type).
+
+If that's confusing see examples under `inventory_size` on how to access inventories. All other `inventory_...()` functions 
+use the same scheme.
+
  
  If the entity or a block doesn't have 
-an inventory, they typically do nothing and return null.
+an inventory, all API functions typically do nothing and return null.
 
 Most items returned are in the form of a triple of item name, count, and nbt or the extra data associated with an item. 
-Manipulating of the nbt data can be costly, but retrieving them from the tuple to match other aspects is cheap
+
+### item_list(tag?)
+
+With no arguments, returns a list of all items in the game. With an item tag provided, list items matching the tag, or `null` if tag is not valid.
+
+### item_tags(item, tag?)
+
+Returns list of tags the item belongs to, or, if tag is provided, `true` if an item maches the tag, `false` if it doesn't and `null` if that's not a valid tag
 
 ### `stack_limit(item)`
 
@@ -3669,13 +3887,26 @@ item name that serves as a replacement after crafting is done. Currently it can 
 ### `inventory_size(inventory)`
 
 Returns the size of the inventory for the entity or block in question. Returns null if the block or entity don't 
-have an inventory
+have an inventory.
 
 <pre>
 inventory_size(player()) => 41
 inventory_size('enderchest', player()) => 27 // enderchest
+inventory_size('equipment', player()) => 6 // equipment
+inventory_size(null, player()) => 41  // default inventory for players
+
 inventory_size(x,y,z) => 27 // chest
 inventory_size(block(pos)) => 5 // hopper
+
+horse = spawn('horse', x, y, z);
+inventory_size(horse); => 2 // default horse inventory
+inventory_size('equipment', horse); => 6 // unused horse equipment inventory
+inventory_size(null, horse); => 2 // default horse
+
+creeper = spawn('creeper', x, y, z);
+inventory_size(creeper); => 6 // default creeper inventory is equipment since it has no other
+inventory_size('equipment', creeper); => 6 // unused horse equipment inventory
+inventory_size(null, creeper); => 6 // creeper default is its equipment
 </pre>
 
 ### `inventory_has_items(inventory)`
@@ -3758,10 +3989,8 @@ with `__on_<event>` and has the required arguments, will be bound automatically 
 of such function would result in unbinding the app from this event.
 
 In case of `player` scoped apps, 
-all player action events will be directed to the appropriate player hosts. Global events, like `'tick'`, cannot be handled
-in `'player'` scoped app.
-
-`'global'` scoped apps will receive both global and player built-in events.
+all player action events will be directed to the appropriate player hosts. Global events, like `'tick'`, that don't have a specific
+player target will be executed multiple times, once for each player, and once in `'global'` scoped apps.
 
 Most built-in events strive to report right before they take an effect in the game. The purpose of that is that this give a choice
 for the programmer to handle them right away (as it happens, potentially affect the course of action by changing the
@@ -3778,10 +4007,38 @@ Here is a list of events that are handled by default in scarpet. This list inclu
 to autoload them, but you can always add any function to any event (using `/script event` command)
 if it accepts required number of parameters.
 
+## Meta-events
+
+These events are not controlled / triggered by the game per se, but are important for the flow of the apps, however for all 
+intent and purpose can be treated as regular events. Unlike regular events, they cannot be hooked up to with 'handle_event',
+but the apps themselves need to have them defined as distinct function definitions, same they cannot be signalled.
+
+### `__on_start()`
+Called once per app in its logical execution run. For `'global'` scope apps its executed right after the app is loaded. For
+`'player'` scope apps, it is triggered once per player before the app can be used by that player. Since each player app acts
+independently from other player apps, this is probably the best location to include some player specific initializations. Static
+code (i.e. code typed directly in the app code that executes immediately, outside of function definitions), will only execute once
+per app, regardless of scope, `'__on_start()'` allows to reliably call player specific initializations.
+
+### `__on_close()`
+
+Called once per app when the app is closing or reloading, right before the app is removed. 
+For player scoped apps, its called once per player. Scarpet app engine will attempt to call `'__on_close()'` even if
+the system is closing down exceptionally. 
+ 
+
 ## Built-in global events
 
-Handling global events is only allowed in apps with `'global'` scope. With the default scope (`'player'`) you
-simply wouldn't know which player to hook up this event to.
+Global events will be handled once per app that is with `'global'` scope. With `player` scoped apps, each player instance
+ is responsible independently from handling their events, so a global event may be executed multiple times for each player.
+
+
+### `__on_server_starts()`
+Event triggers after world is loaded and after all startup apps have started. It won't be triggered with `/reload`.
+
+### `__on_server_shuts_down()`
+Event triggers when the server started the shutdown process, before `__on_close()` is executed. Unlike `__on_close()`, it doesn't
+trigger with `/reload`.
 
 ### `__on_tick()`
 Event triggers at the beginning of each tick, located in the overworld. You can use `in_dimension()`
@@ -3858,7 +4115,12 @@ adjusted.
 ### `__on_player_interacts_with_entity(player, entity, hand)`
 Triggered when player right clicks (interacts) with an entity, even if the entity has no vanilla interaction with the player or
 the item they are holding. The event is invoked after receiving a packet from the client, before anything happens server side
-with that interaction
+with that interaction.
+
+### `__on_player_trades(player, entity, buy_left, buy_right, sell)`
+Triggered when player trades with a merchant. The event is invoked after the server allow the trade, but before the inventory
+changes and merchant updates its trade-uses counter.
+The parameter `entity` can be `null` if the merchant is not an entity.
 
 ### `__on_player_collides_with_entity(player, entity)`
 Triggered every time a player - entity collisions are calculated, before effects of collisions are applied in the game. 
@@ -3875,6 +4137,11 @@ the slot.
 
 ### `__on_player_swaps_hands(player)`
 Triggered when a player sends a command to swap their offhand item. Executed before the effect is applied on the server.
+
+### `__on_player_swings_hand(player, hand)`
+Triggered when a player starts swinging their hand. The event typically triggers after a corresponding event that caused it 
+(`player_uses_item`, `player_breaks_block`, etc.), but it triggers also after some failed events, like attacking the air. When
+swinging continues as an effect of an action, no new swinging events will be issued until the swinging is stopped.
 
 ### `__on_player_attacks_entity(player, entity)`
 Triggered when a player attacks entity, right before it happens server side.
@@ -3894,8 +4161,10 @@ about players death and applying external effects (like mob anger etc).
 
 ### `__on_player_respawns(player)`
 Triggered when a player respawns. This includes spawning after death, or landing in the overworld after leaving the end. 
-When the event is handled, a player is still in its previous location and dimension - will be repositioned right after.
-
+When the event is handled, a player is still in its previous location and dimension - will be repositioned right after. In 
+case player died, its previous inventory as already been scattered, and its current inventory will not be copied to the respawned
+entity, so any manipulation to player data is
+best to be scheduled at the end of the tick, but you can still use its current reference to query its status as of the respawn event.
 
 ### `__on_player_changes_dimension(player, from_pos, from_dimension, to_pos, to_dimension)`
 Called when a player moves from one dimension to another. Event is handled still when the player is in its previous
@@ -3919,6 +4188,10 @@ Triggered when a server receives a request to deploy elytra, regardless if the f
 ### `__on_player_wakes_up(player)`
 Player wakes up from the bed mid sleep, but not when it is kicked out of bed because it finished sleeping.
 
+### `__on_player_escapes_sleep(player)`
+Same as `player_wakes_up` but only triggered when pressing the ESC button. Not sure why Mojang decided to send that event
+twice when pressing escape, but might be interesting to be able to detect that.
+
 ### `__on_player_starts_sneaking(player)`
 ### `__on_player_stops_sneaking(player)`
 ### `__on_player_starts_sprinting(player)`
@@ -3936,7 +4209,7 @@ ingested by the player. The exact position of these items is unknown as technica
 items could be spread all across the inventory.
 
 ### `__on_player_connects(player)`
-Triggered when the player has successfully logged in and was placed in the gaem.
+Triggered when the player has successfully logged in and was placed in the game.
 
 ### `__on_player_disconnects(player, reason)`
 Triggered when a player sends a disconnect package or is forcefully disconnected from the server.
@@ -3950,8 +4223,11 @@ is handled before scoreboard values for these statistics are changed.
 
 App programmers can define and trigger their own custom events. Unlike built-in events, all custom events pass a single value
 as an argument, but this doesn't mean that they cannot pass a complex list, map, or nbt tag as a message. Each event signal is
-either targetting all global context apps, if no target player has been identified, or only player scoped apps, if the target player
-is specified.
+either targetting all apps instances for all players, including global apps, if no target player has been identified, 
+or only player scoped apps, if the target player
+is specified, running once for that player app. You cannot target global apps with player-targeted signals. Built-in events
+do target global apps, since their first argument is clearly defined and passed. That may change in the future in case there is 
+a compelling argument to be able to target global apps with player scopes. 
 
 Programmers can also handle built-in events the same way as custom events, as well as triggering built-in events, which I have
 have no idea why you would need that. The following snippets have the same effect:
@@ -3975,11 +4251,11 @@ handle_event('player_breaks_block', null);
 And `signal_event` can be used as a trigger, called twice for player based built-in events
 ```
 signal_event('player_breaks_block', player, player, block); // to target all player scoped apps
-signal_event('player_breaks_block', null  , player, block); // to target all global scoped apps
+signal_event('player_breaks_block', null  , player, block); // to target all global scoped apps and all player instances
 ```
-or (for global only events)
+or (for global events)
 ```
-signal_event('tick') // trigger only global scoped apps with no extra arguments
+signal_event('tick') // trigger all apps with a tick event
 ```
 
 ### `handle_event(event, callback ...)`
@@ -3993,6 +4269,8 @@ If extra arguments are provided, they will be appended to the argument list of t
 Returns `true` if subscription to the event was successful, or `false` if it failed (for instance wrong scope for built-in event,
 or incorect number of parameters for the event).
 
+If a callback is specified as `null`, the given app (or player app instance )stops handling that event. 
+
 <pre>
 foo(a) -> print(a);
 handle_event('boohoo', 'foo');
@@ -4005,129 +4283,79 @@ handle_event('tick', _() -> foo('tick happened')); // built-in event
 handle_event('tick', null)  // nah, ima good, kthxbai
 </pre>
 
+In case you want to pass an event handler that is not defined in your module, please read the tips on
+ "Passing function references to other modules of your application" section in the `call(...)` section.
+
+
 ### `signal_event(event, target_player?, ... args?)`
 
-Fires a specific event. If the event does not exist (only `handle_event` creates missing mising new events), or provided argument list
+Fires a specific event. If the event does not exist (only `handle_event` creates missing new events), or provided argument list
 was not matching the callee expected arguments, returns `null`, 
 otherwise returns number of apps notified. If `target_player` is specified and not `null` triggers a player specific event, targetting
 only `player` scoped apps for that player. Apps with globals scope will not be notified even if they handle this event.
-If the `target_player` is omitted or `null`, it will instead only target `global` scoped apps and skip `player` scoped.
-Therefore each custom event trigger can trigger each app once, but calls to '`signal_event`' can be repeated to cover
-all app scopes. Note that all built-in player events have a player as a first argument, so to trigger these events, you need to 
+If the `target_player` is omitted or `null`, it will target `global` scoped apps and all instances of `player` scoped apps.
+Note that all built-in player events have a player as a first argument, so to trigger these events, you need to 
 provide them twice - once to specify the target player scope and second - to provide as an argument to the handler function.
 
 <pre>
 signal_event('player_breaks_block', player, player, block); // to target all player scoped apps
-signal_event('player_breaks_block', null  , player, block); // to target all global scoped apps
-signal_event('tick') // triggering tick event in all loaded apps
+signal_event('player_breaks_block', null  , player, block); // to target all global scoped apps and all player instances
+signal_event('tick') // trigger all apps with a tick event
 </pre>
 
 ## Custom events example
 
-The following example contains 4 apps, 2 of them defining a new event, `"player_farts"` triggered after 40 ticks of continuous 
-squatting. Note that this could call the recipient event handlers twice, since `signal_event` will be called twice, but 
-in this case the event is once called as a global event, and once as a player event, targeting each app once. Custom events is
-a good idea to share common event detection code with one app, and using the outcome of these events in multiple places.
-Obviously you would define each event handler once not twice in your app system.
- 
-In this
-case here we have two ways of detecting all players squatting for more than 40 ticks - one of those apps will produce cloud particles
-in an apprpriate location, and the other will produce a sound when it happens, and they both will proceed to signal the same event, 
-thankfully for different scopes, otherwise other apps would trigger twice.
+The following example shows how you can communicate between different instances of the same player scoped app. It important to note
+that signals can trigger other apps as well, assuming the name of the event matches. In this case the request name is called
+`tp_request` and is triggered with a command.
+
 
 ``` 
-// detector1.sc
-// detecting event in a tick loop
-__config() -> {'scope' -> 'global'};
-
-global_sneaks = {};
-__on_tick() -> for(player('all'),
-   if (_~'sneaking',
-      sneak_time =  if (has(global_sneaks:_), tick_time()-global_sneaks:_ ,  global_sneaks:_=tick_time(); 0);
-      if (sneak_time > 20 && sneak_time < 40, 
-         particle('cloud', pos(_) + [0, _~'height'/2, 0] - _~'look', 1, 0.1)
-      );
-      if (sneak_time == 40, 
-         signal_event('player_farts', _, _)  // triggering all player scoped apps from a global app
+// tpa.sc
+global_requester = null;
+__config() -> {
+	'commands' -> {
+		'<player>' -> _(to) -> signal_event('tp_request', to, player()),
+      'accept' -> _() -> if(global_requester, 
+         run('tp '+global_requester~'command_name'); 
+         global_requester = null
       )
-   , // else
-      delete(global_sneaks:_)
-   )
-)
+	},
+   'arguments' -> {
+      'player' -> {'type' -> 'players', 'single' -> true}
+   }
+};
+handle_event('tp_request', _(req) -> (
+   global_requester = req;
+   print(player(), format(
+      'w '+req+' requested to teleport to you. Click ',
+      'yb here', '^yb here', '!/tpa accept',
+      'w  to accept it.'
+   ));
+));
 ```
-
-```
-// detector2.sc
-// detecting events in a more appropriate way - player based and event based app
-__on_player_starts_sneaking(p) -> 
-(
-   global_sneaking = tick_time();
-   schedule(40, 'check', p);
-);
-
-check(p) -> 
-if( global_sneaking && tick_time() - global_sneaking == 40,
-   sound('entity.shulker.shoot', pos(p), 1, 0.6, 'player');
-   signal_event('player_farts', null, p) // trigerring all global apps from a player scoped app
-);
-
-__on_player_stops_sneaking(p) -> (global_sneaking = false);
-```
-
-And then two other apps that meant to do something with this event. One mimics an explosion, and the other - grows crops around
-the player.
-
-```
-client1.sc
-__config() -> {'scope' -> 'global'};
-
-on_fart(p, msg) -> 
-(
-   print(p+msg);
-   particle('explosion', pos(p));
-   sound('entity.generic.explode', pos(p), 1, 0.5);
-);
-
-handle_event('player_farts', 'on_fart', ' goes kaboom');
-```
-
-```
-client2.sc
-longsneak(p) ->
-(
-   ppos = pos(p);
-   loop ( 500,
-      target = ppos+[rand(12),rand(8),rand(12)]-[rand(12),rand(8),rand(12)];
-      if (material(target) == 'plant' && ticks_randomly(target), 
-         particle('happy_villager', target, 2, 0.4)
-      );
-      random_tick(target)
-   )
-);
-
-handle_event('player_farts', 'longsneak');
-```
-
 
 ## `/script event` command
 
-used to display current events and bounded functions. use `add_to` ro register new event, or `remove_from` to 
+used to display current events and bounded functions. use `add_to` to register a new event, or `remove_from` to 
 unbind a specific function from an event. Function to be bounded to an event needs to have the same number of 
 parameters as the action is attempting to bind to (see list above). All calls in modules loaded via `/script load` 
-that have functions listed above will be automatically bounded and unbounded when script is unloaded.
+that handle specific built-in events will be automatically bounded, and unbounded when script is unloaded.
 # Scoreboard
 
 ### `scoreboard()`, `scoreboard(objective)`, `scoreboard(objective, key)`, `scoreboard(objective, key, value)`
 
 Displays or modifies individual scoreboard values. With no arguments, returns the list of current objectives.
-With specified `objective`, lists all keys (players) associated with current objective. With specified `objective`,
+With specified `objective`, lists all keys (players) associated with current objective, or `null` if objective does not exist.
+With specified `objective` and
 `key`, returns current value of the objective for a given player (key). With additional `value` sets a new scoreboard
  value, returning previous value associated with the `key`.
  
 ### `scoreboard_add(objective, criterion?)`
 
-Adds a new objective to scoreboard. If `criterion` is not specified, assumes `'dummy'`. Returns `false` if objective 
-already existed, `true` otherwise.
+Adds a new objective to scoreboard. If `criterion` is not specified, assumes `'dummy'`.
+If the objective already exists, changes the criterion of that objective and returns `false`. If the criterion was not specified but the objective already exists, returns the current criterion.
+If the objective was added, returns `true`. If nothing is affected, returns `null`
 
 <pre>
 scoreboard_add('counter')
@@ -4143,7 +4371,8 @@ for the objective.
 
 ### `scoreboard_display(place, objective)`
 
-sets display location for a specified `objective`. If `objective` is `null`, then display is cleared.
+Sets display location for a specified `objective`. If `objective` is `null`, then display is cleared. If objective is invalid,
+returns `null`.
 
 # Team
 
@@ -4155,7 +4384,11 @@ When a `team` is specified, it returns all the players inside that team. If the 
 
 ### `team_add(team)`, `team_add(team,player)`
 
-With one argument, creates a new `team` and returns its name if successfull, or `null` if team already exists.
+With one argument, creates a new `team` and returns its name if successful, or `null` if team already exists.
+
+
+`team_add('admin')` -> Create a team with the name 'admin'
+`team_add('admin','Steve')` -> Joing the player 'Steve' into the team 'admin'
 
 If a `player` is specified, the player will join the given `team`. Returns `true` if player joined the team, or `false` if nothing changed since the player was already in this team. If the team is invalid, returns `null`
 
@@ -4167,43 +4400,20 @@ Removes a `team`. Returns `true` if the team was deleted, or `null` if the team 
 
 Removes the `player` from the team he is in. Returns `true` if the player left a team, otherwise `false`.
 
-### `team_empty(team)`
+`team_leave('Steve')` -> Removes Steve from the team he is currently in
+`for(team_list('admin'), team_leave('admin', _))` -> Remove all players from team 'admin'
 
-Removes all players inside the `team` and returns the number of people that were in the team, or `null` if the team is invalid.
-
-### `team_modify(team,property,value?)`
+### `team_property(team,property,value?)`
 
 Reads the `property` of the `team` if no `value` is specified. If a `value` is added as a third argument, it sets the `property` to that `value`.
 
-The properties are the same as in `/team modify` command:
-
 * `collisionRule`
   * Type: String
-  * Options:
-    * always
-    * never
-    * pushOtherTeams
-    * pushOwnTeam
+  * Options: always, never, pushOtherTeams, pushOwnTeam
     
 * `color`
   * Type: String
-  * Options: (same strings as `'teamcolor'` [command argument](https://github.com/gnembon/fabric-carpet/blob/master/docs/scarpet/Full.md#command-argument-types] options)
-    * aqua
-    * black
-    * blue
-    * dark_aqua
-    * dark_blue
-    * dark_gray
-    * dark_green
-    * dark_purple
-    * dark_red
-    * gold
-    * gray
-    * green
-    * light_purple
-    * red
-    * yellow
-    * white
+  * Options: See [team command](https://minecraft.gamepedia.com/Commands/team#Arguments) (same strings as `'teamcolor'` [command argument](https://github.com/gnembon/fabric-carpet/blob/master/docs/scarpet/Full.md#command-argument-types) options)
 
 * `displayName`
   * Type: String or FormattedText, when querying returns FormattedText
@@ -4222,43 +4432,80 @@ The properties are the same as in `/team modify` command:
   
 * `nametagVisibility`
   * Type: String
-  * Options:
-    * always
-    * never
-    * hideForOtherTeams
-    * hideForOwnTeam
+  * Options: always, never, hideForOtherTeams, hideForOwnTeam
 
 * `deathMessageVisibility`
   * Type: String
-  * Options:
-    * always
-    * never
-    * hideForOtherTeams
-    * hideForOwnTeam
-    
-## Example usage:
+  * Options: always, never, hideForOtherTeams, hideForOwnTeam
 
-`team_add('admin')` Create a team with the name 'admin'
+Examples:
 
-`team_add('admin','Steve')` Joing the player 'Steve' into the team 'admin'
+```
+team_property('admin','color','dark_red')                 Make the team color for team 'admin' dark red
+team_property('admin','prefix',format('r Admin | '))      Set prefix of all players in 'admin'
+team_property('admin','display_name','Administrators')     Set display name for team 'admin'
+team_property('admin','seeFriendlyInvisibles',true)       Make all players in 'admin' see other admins even when invisible
+team_property('admin','deathMessageVisibility','hideForOtherTeams')       Make all players in 'admin' see other admins even when invisible
+```
 
-`team_leave('Steve')` Steve leaves the team he is currently in
+## `bossbar()`, `bossbar(id)`, `bossbar(id,property,value?)`
 
-`team_empty('admin')` All player in the team 'admin' will be removed from it
+Manage bossbars just like with the `/bossbar` command.
 
-`team_list()` List all teams
+Without any arguments, returns a list of all bossbars.
 
-`team_list('admin')` Get all players in 'admin' team
+When an id is specified, creates a bossbar with that `id` and returns the id of the created bossbar.
+Bossbar ids need a namespace and a name. If no namespace is specified, it will automatically use `minecraft:`.
+In that case you should keep track of the bossbar with the id that `bossbar(id)` returns, because a namespace may be added automatically.
+If the id was invalid (for example by having more than one colon), returns `null`.
+If the bossbar already exists, returns `false`.
 
-`team_modify('admin','color','dark_red')` Make the team color for team 'admin' dark red
+`bossbar('timer') => 'minecraft:timer'` (Adds the namespace `minecraft:` because none is specified)
 
-`team_modify('admin','prefix',format('r Admin | '))` Set prefix of all players in 'admin'
+`bossbar('scarpet:test') => 'scarpet:test'` In this case there is already a namespace specified
 
-`team_modify('admin','displayName','Administrators')` Set display name for team 'admin'
+`bossbar('foo:bar:baz') => null` Invalid identifier
 
-`team_modify('admin','seeFriendlyInvisibles',true)` Make all players in 'admin' see other admins even when invisible
+`bossbar(id,property)` is used to query the `property` of a bossbar.
 
-`team_remove('admin')` Remove team admin
+`bossbar(id,property,value)` can modify the `property` of the bossbar to a specified `value`.
+
+Available properties are:
+
+* color: can be `'pink'`, `'blue'`, `'red'`, `'green'`, `'yellow'`, `'purple'` or `'white'`
+
+* style: can be `'progress'`, `'notched_6'`, `'notched_10'`, `'notched_12'` or `'notched_20'`
+
+* value: value of the bossbar progress
+
+* max: maximum value of the bossbar progress, by default 100
+
+* name: Text to display above the bossbar, supports formatted text
+
+* visible: whether the bossbar is visible or not
+
+* players: List of players that can see the bossbar
+
+* add_player: add a player to the players that can see this bossbar, this can only be used for modifying (`value` must be present)
+
+* remove: remove this bossbar, no `value` required
+
+```
+bossbar('script:test','style','notched_12')
+bossbar('script:test','value',74)
+bossbar('script:test','name',format('rb Test'))  -> Change text
+bossbar('script:test','visible',false)  -> removes visibility, but keeps players
+bossbar('script:test','players',player('all'))  -> Visible for all players
+bossbar('script:test','players',player('Steve'))  -> Visible for Steve only 
+bossbar('script:test','players',null)  -> Invalid player, removing all players
+bossbar('script:test','add_player',player('Alex'))  -> Add Alex to the list of players that can see the bossbar
+bossbar('script:test','remove')  -> remove bossbar 'script:test'
+for(bossbar(),bossbar(_,'remove'))  -> remove all bossbars
+```
+
+
+
+
 # Auxiliary aspects
 
 Collection of other methods that control smaller, yet still important aspects of the game
@@ -4424,6 +4671,12 @@ Consult section about container operations in `Expression` to learn about possib
 Excapes all the special characters in the string or nbt tag and returns a string that can be stored in nbt directly 
 as a string value.
 
+### `tag_matches(daddy_tag, baby_tag, match_lists?)`
+
+Utility returning `true` if `baby_tag` is fully contained in `daddy_tag`. Anything matches `null` baby tag, and
+Nothing is contained in a `null` daddy tag. If `match_lists` is specified and `false`, content of nested lists is ignored. 
+Default behaviour is to match them.
+
 ### `parse_nbt(tag)`
 
 Converts NBT tag to a scarpet value, which you can navigate through much better.
@@ -4448,9 +4701,10 @@ Other value types will only be converted to tags (including NBT tags) if `force`
 extra treatment when loading them back from NBT, but using `force` true will always produce output / never 
 produce an exception.
 
-### `print(expr)`
+### `print(expr)`, `print(player/player_list, expr)`
 
 Displays the result of the expression to the chat. Overrides default `scarpet` behaviour of sending everyting to stderr.
+Can optionally define player or list of players to send the message to.
 
 ### `format(components, ...)`, `format(l(components, ...))`
 
@@ -4506,6 +4760,18 @@ Example usages:
   // not a problem in apps
 </pre>
 
+### `display_title(players, type, title?, fadeInTicks?, stayTicks?, fadeOutTicks),`
+
+Sends the player (or players if `players` is a list) a title of a specific type, with optionally some times.
+ * `players` is either an online player or a list of players. When sending a single player, it will throw if the player is invalid or offline.
+ * `type` is either `'title'`, `'subtitle'`, `actionbar` or `clear`.
+   Note: `subtitle` will only be displayed if there is a title being displayed (can be an empty one)
+ * `title` is what title to send to the player. It is required except for `clear` type. Can be a text formatted using `format()`
+ * `...Ticks` are the number of ticks the title will stay in that state.
+   If not specified, it will use current defaults (those defaults may have changed from a previous `/title times` execution).
+   Executing with those will set the times to the specified ones.
+   Note that `actionbar` type doesn't support changing times (vanilla bug, see [MC-106167](https://bugs.mojang.com/browse/MC-106167)).
+
 ### `logger(msg), logger(type, msg)`
 
 Prints the message to system logs, and not to chat. By default prints an info, unless you specify otherwise in the `type` parameter.
@@ -4518,13 +4784,15 @@ Available output types:
 ### `read_file(resource, type)`
 ### `delete_file(resource, type)`
 ### `write_file(resource, type, data, ...)`
+### `list_files(resource, type)`
 
 With the specified `resource` in the scripts folder, of a specific `type`, writes/appends `data` to it, reads its
- content, or deletes the resource.
+ content, deletes the resource, or lists other files under this resource.
 
 Resource is identified by a path to the file.  
 A path can contain letters, numbers, characters `-`, `+`, or `_`, and a folder separator: `'/'`. Any other characters are stripped
-from the name. Empty descriptors are invalid. Do not add file extensions to the descriptor - extensions are inferred
+from the name. Empty descriptors are invalid, except for `list_files` where it means the root folder.
+ Do not add file extensions to the descriptor - extensions are inferred
 based on the `type` of the file.
  
 Resources can be located in the app specific space, or a shared space for all the apps. Accessing of app-specific
@@ -4539,33 +4807,29 @@ specific data directory is under `world/scripts/foo.data/...`, and shared data s
 
 The default no-name app, via `/script run` command can only save/load/read files from the shared space.
 
-Functions return `null` if an error is encounter or no file is present (for read and delete operations). Returns `true`
-for success writes and deletes, and requested data, based on the file type, for read operations.
-
-NBT files can be written once as they an store one tag at a time. Consecutive writes will overwrite previous data.
-
-Write operations to text files always result in appending to the existing file, so consecutive writes will increase
-the size of the file and add data to it. Since files are closed after each write, sending multiple lines of data to
-write is beneficial for writing speed. To send multiple packs of data, either provide them flat or as a list in the
-third argument.
- * `write_file('temp', 'text', 'foo', 'bar', 'baz')` or
- * write_file('temp', 'text', l('foo', 'bar', 'baz'))
+Functions return `null` if an error is encounter or no file is present (for read, list and delete operations). Returns `true`
+for success writes and deletes, and requested data, based on the file type, for read operations. It returns list of files 
+for folder listing.
  
-To log a single line of string
- 
-Supported values for resource `type` is:
+Supported values for resource `type` are:
  * `nbt` - NBT tag
+ * `json` - JSON file
  * `text` - text resource with automatic newlines added
  * `raw` - text resource without implied newlines
- * `shared_nbt`, `shared_text`, `shared_raw` - shared versions of the above
+ * `folder` - for `list_files` only - indicating folder listing instead of files
+ * `shared_nbt`, `shared_text`, `shared_raw`, `shared_folder`, `shared_json` - shared versions of the above
  
-NBT files have extension `.nbt`, store one NBT tag, and return a NBT type value. Text files have `.txt` extension, 
+NBT files have extension `.nbt`, store one NBT tag, and return a NBT type value. JSON files have `.json` extension, store 
+Scarpet numbers, strings, lists, maps and `null` values. Anything else will be saved as a string (including NBT).  
+Text files have `.txt` extension, 
 stores multiple lines of text and returns lists of all lines from the file. With `write_file`, multiple lines can be
 sent to the file at once. The only difference between `raw` and `text` types are automatic newlines added after each
-record to the file.
+record to the file. Since files are closed after each write, sending multiple lines of data to
+write is beneficial for writing speed. To send multiple packs of data, either provide them flat or as a list in the
+third argument.
 
 <pre>
-write_file('foo', 'shared_text, l('one', 'two'));
+write_file('foo', 'shared_text, ['one', 'two']);
 write_file('foo', 'shared_text', 'three\n', 'four\n');
 write_file('foo', 'shared_raw', 'five\n', 'six\n');
 
@@ -4653,9 +4917,24 @@ averaging.
 
 ### `game_tick(mstime?)`
 
-Causes game to run for one tick. By default runs it and returns control to the program, but can optionally 
-accept expected tick length, in milliseconds. You can't use it to permanently change the game speed, but setting 
-longer commands with custom tick speeds can be interrupted via `/script stop` command
+Causes game to run for one tick. By default, it runs it and returns control to the program, but can optionally 
+accept expected tick length, in milliseconds, waits that extra remaining time and then returns the control to the program.
+You can't use it to permanently change the game speed, but setting 
+longer commands with custom tick speeds can be interrupted via `/script stop` command - if you can get access to the 
+command terminal.
+
+Running `game_tick()` as part of the code that runs within the game tick itself is generally a bad idea, 
+unless you know what this entails. Triggering the `game_tick()` will cause the current (shoulder) tick to pause, then run the internal tick, 
+then run the rest of the shoulder tick, which may lead to artifacts in between regular code execution and your game simulation code.
+If you need to break
+up your execution into chunks, you could queue the rest of the work into the next task using `schedule`, or perform your actions
+defining `__on_tick()` event handler, but in case you need to take a full control over the game loop and run some simulations using 
+`game_tick()` as the way to advance the game progress, that might be the simplest way to do it, 
+and triggering the script in a 'proper' way (there is not 'proper' way, but via commmand line, or server chat is the most 'proper'),
+would be the safest way to do it. For instance, running `game_tick()` from a command block triggered with a button, or in an entity
+ event triggered in an entity tick, may technically
+cause the game to run and encounter that call again, causing stack to overflow. Thankfully it doesn't happen in vanilla running 
+carpet, but may happen with other modified (modded) versions of the game.
 
 <pre>
 loop(1000,game_tick())  // runs the game as fast as it can for 1000 ticks
@@ -4692,6 +4971,9 @@ algorithm has taken in to account last time mobs spawned.
 Schedules a user defined function to run with a specified `delay` ticks of delay. Scheduled functions run at the end 
 of the tick, and they will run in order they were scheduled.
 
+In case you want to schedule a function that is not defined in your module, please read the tips on
+ "Passing function references to other modules of your application" section in the `call(...)` section.
+
 ### `statistic(player, category, entry)`
 
 Queries in-game statistics for certain values. Categories include:
@@ -4717,7 +4999,7 @@ it could either mean your input is wrong, or statistic effectively has a value o
 ### `system_info()`, `system_info(property)`
 Fetches the value of a system property or returns all inforation as a map when called without any arguments. It can be used to 
 fetch various information, mostly not changing, or only available via low level
-system calls. In all cirumstances, these are only provided as read-only.
+system calls. In all circumstances, these are only provided as read-only.
 
 Available options in the scarpet app space:
   * `app_name` - current app name or `null` if its a default app
@@ -4730,10 +5012,12 @@ Available options in the scarpet app space:
   * `world_seed` - a numeric seed of the world
   * `world_path` - full path to the world saves folder
   * `world_folder` - name of the direct folder in the saves that holds world files
-  * `world_carpet_rules` - returns all Carpet rules in a map form (`rule`->`value`). Includes rules from extensions with their namespace (`namespace:rule`->`value`). You can later listen to rule changes with the `on_carpet_rule_change(rule, newValue)` event.
- 
+  * `world_carpet_rules` - returns all Carpet rules in a map form (`rule`->`value`). Note that the values are always returned as strings, so you can't do boolean comparisons directly. Includes rules from extensions with their namespace (`namespace:rule`->`value`). You can later listen to rule changes with the `on_carpet_rule_changes(rule, newValue)` event.
+  * `world_gamerules` - returns all gamerules in a map form (`rule`->`value`). Like carpet rules, values are returned as strings, so you can use appropriate value conversions using `bool()` or `number()` to convert them to other values. Gamerules are read-only to discourage app programmers to mess up with the settings intentionally applied by server admins. Isn't that just super annoying when a datapack messes up with your gamerule settings? It is still possible to change them though using `run('gamerule ...`.
+
+
  Relevant gameplay related properties
-  * `game_difficulty` - current difficulty of the game: `'peacefu'`, `'easy'`, `'normal'`, or `'hard'`
+  * `game_difficulty` - current difficulty of the game: `'peaceful'`, `'easy'`, `'normal'`, or `'hard'`
   * `game_hardcore` - boolean whether the game is in hardcore mode
   * `game_storage_format` - format of the world save files, either `'McRegion'` or `'Anvil'`
   * `game_default_gamemode` - default gamemode for new players
@@ -4741,15 +5025,16 @@ Available options in the scarpet app space:
   * `game_view_distance` - the view distance
   * `game_mod_name` - the name of the base mod. Expect `'fabric'`
   * `game_version` - base version of the game
+  * `game_data_version` - data version of the game. Returns an integer, so it can be compared.
   
  Server related properties
-
  * `server_motd` - the motd of the server visible when joining
  * `server_ip` - IP adress of the game hosted
  * `server_whitelisted` - boolean indicating whether the access to the server is only for whitelisted players
  * `server_whitelist` - list of players allowed to log in
  * `server_banned_players` - list of banned player names
  * `server_banned_ips` - list of banned IP addresses
+ * `server_dev_environment` - boolean indicating whether this server is in a development environment.
  
  System related properties
  * `java_max_memory` - maximum allowed memory accessible by JVM
@@ -4759,7 +5044,17 @@ Available options in the scarpet app space:
  * `java_version` - version of Java
  * `java_bits` - number indicating how many bits the Java has, 32 or 64
  * `java_system_cpu_load` - current percentage of CPU used by the system
- * `java_process_cpu_load` - current percentage of CPU used by JVM# `/script run` command
+ * `java_process_cpu_load` - current percentage of CPU used by JVM
+ 
+ Scarpet related properties
+ * `scarpet_version` - returns the version of the carpet your scarpet comes with.
+
+## NBT Storage
+
+### `nbt_storage()`, `nbt_storage(key)`, `nbt_storage(key, nbt)`
+Displays or modifies individual storage NBT tags. With no arguments, returns the list of current NBT storages. With specified `key`, returns the `nbt` associated with current `key`, or `null` if storage does not exist. With specified `key` and `nbt`, sets a new `nbt` value, returning previous value associated with the `key`.
+NOTE: This NBT storage is shared with all vanilla datapacks and scripts of the entire server and is persistent between restarts and reloads. You can also access this NBT storage with vanilla `/data <get|modify|merge> storage <key> ...` command.
+# `/script run` command
 
 Primary way to input commands. The command executes in the context, position, and dimension of the executing player, 
 commandblock, etc... The command receives 4 variables, `x`, `y`, `z` and `p` indicating position and 
@@ -4769,13 +5064,15 @@ to simulate running commands in a different scope.
 
 # `/script load / unload <app> (global?)`, `/script in <app>` commands
 
-`load / unload` commands allow for very conventient way of writing your code, providing it to the game and 
-distribute with your worlds without the need of use of commandblocks. Just place your scarpet code in the 
-/scripts folder of your world files and make sure it ends with `.sc` extension. The good thing about editing that 
-code is that you can no only use normal editing without the need of marking of newlines, 
+`load / unload` commands allow for very convenient way of writing your code, providing it to the game and 
+distribute with your worlds without the need of use of commandblocks. Just place your Scarpet code in the 
+`/scripts` folder of your world files and make sure it ends with `.sc` extension. In singleplayer, you can 
+also save your scripts in `.minecraft/config/carpet/scripts` to make them available in any world.
+
+The good thing about editing that code is that you can not only use normal editing without the need of marking of newlines,  
 but you can also use comments in your code.
 
-a comment is anything that starts with a double slash, and continues to the end of the line:
+A comment is anything that starts with a double slash, and continues to the end of the line:
 
 <pre>
 foo = 1;
