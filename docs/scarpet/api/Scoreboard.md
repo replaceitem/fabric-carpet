@@ -3,8 +3,7 @@
 ### `scoreboard()`, `scoreboard(objective)`, `scoreboard(objective, key)`, `scoreboard(objective, key, value)`
 
 Displays or modifies individual scoreboard values. With no arguments, returns the list of current objectives.
-With specified `objective`, lists all keys (players) associated with current objective, or `null` if objective does not exist.
-With specified `objective` and
+With specified `objective`, lists all keys (players) associated with current objective. With specified `objective`,
 `key`, returns current value of the objective for a given player (key). With additional `value` sets a new scoreboard
  value, returning previous value associated with the `key`.
  
@@ -27,8 +26,7 @@ for the objective.
 
 ### `scoreboard_display(place, objective)`
 
-Sets display location for a specified `objective`. If `objective` is `null`, then display is cleared. If objective is invalid,
-returns `null`.
+sets display location for a specified `objective`. If `objective` is `null`, then display is cleared.
 
 # Team
 
@@ -40,11 +38,7 @@ When a `team` is specified, it returns all the players inside that team. If the 
 
 ### `team_add(team)`, `team_add(team,player)`
 
-With one argument, creates a new `team` and returns its name if successful, or `null` if team already exists.
-
-
-`team_add('admin')` -> Create a team with the name 'admin'
-`team_add('admin','Steve')` -> Joing the player 'Steve' into the team 'admin'
+With one argument, creates a new `team` and returns its name if successfull, or `null` if team already exists.
 
 If a `player` is specified, the player will join the given `team`. Returns `true` if player joined the team, or `false` if nothing changed since the player was already in this team. If the team is invalid, returns `null`
 
@@ -56,20 +50,43 @@ Removes a `team`. Returns `true` if the team was deleted, or `null` if the team 
 
 Removes the `player` from the team he is in. Returns `true` if the player left a team, otherwise `false`.
 
-`team_leave('Steve')` -> Removes Steve from the team he is currently in
-`for(team_list('admin'), team_leave('admin', _))` -> Remove all players from team 'admin'
+### `team_empty(team)`
 
-### `team_property(team,property,value?)`
+Removes all players inside the `team` and returns the number of people that were in the team, or `null` if the team is invalid.
+
+### `team_modify(team,property,value?)`
 
 Reads the `property` of the `team` if no `value` is specified. If a `value` is added as a third argument, it sets the `property` to that `value`.
 
+The properties are the same as in `/team modify` command:
+
 * `collisionRule`
   * Type: String
-  * Options: always, never, pushOtherTeams, pushOwnTeam
+  * Options:
+    * always
+    * never
+    * pushOtherTeams
+    * pushOwnTeam
     
 * `color`
   * Type: String
-  * Options: See [team command](https://minecraft.gamepedia.com/Commands/team#Arguments) (same strings as `'teamcolor'` [command argument](https://github.com/gnembon/fabric-carpet/blob/master/docs/scarpet/Full.md#command-argument-types) options)
+  * Options: (same strings as `'teamcolor'` [command argument](https://github.com/gnembon/fabric-carpet/blob/master/docs/scarpet/Full.md#command-argument-types] options)
+    * aqua
+    * black
+    * blue
+    * dark_aqua
+    * dark_blue
+    * dark_gray
+    * dark_green
+    * dark_purple
+    * dark_red
+    * gold
+    * gray
+    * green
+    * light_purple
+    * red
+    * yellow
+    * white
 
 * `displayName`
   * Type: String or FormattedText, when querying returns FormattedText
@@ -88,19 +105,40 @@ Reads the `property` of the `team` if no `value` is specified. If a `value` is a
   
 * `nametagVisibility`
   * Type: String
-  * Options: always, never, hideForOtherTeams, hideForOwnTeam
+  * Options:
+    * always
+    * never
+    * hideForOtherTeams
+    * hideForOwnTeam
 
 * `deathMessageVisibility`
   * Type: String
-  * Options: always, never, hideForOtherTeams, hideForOwnTeam
+  * Options:
+    * always
+    * never
+    * hideForOtherTeams
+    * hideForOwnTeam
+    
+## Example usage:
 
-Examples:
+`team_add('admin')` Create a team with the name 'admin'
 
-```
-team_property('admin','color','dark_red')                 Make the team color for team 'admin' dark red
-team_property('admin','prefix',format('r Admin | '))      Set prefix of all players in 'admin'
-team_property('admin','display_name','Administrators')     Set display name for team 'admin'
-team_property('admin','seeFriendlyInvisibles',true)       Make all players in 'admin' see other admins even when invisible
-team_property('admin','deathMessageVisibility','hideForOtherTeams')       Make all players in 'admin' see other admins even when invisible
-```
+`team_add('admin','Steve')` Joing the player 'Steve' into the team 'admin'
 
+`team_leave('Steve')` Steve leaves the team he is currently in
+
+`team_empty('admin')` All player in the team 'admin' will be removed from it
+
+`team_list()` List all teams
+
+`team_list('admin')` Get all players in 'admin' team
+
+`team_modify('admin','color','dark_red')` Make the team color for team 'admin' dark red
+
+`team_modify('admin','prefix',format('r Admin | '))` Set prefix of all players in 'admin'
+
+`team_modify('admin','displayName','Administrators')` Set display name for team 'admin'
+
+`team_modify('admin','seeFriendlyInvisibles',true)` Make all players in 'admin' see other admins even when invisible
+
+`team_remove('admin')` Remove team admin
