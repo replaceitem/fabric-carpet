@@ -16,6 +16,7 @@ import carpet.script.value.NumericValue;
 import carpet.script.value.ScreenHandlerValue;
 import carpet.script.value.StringValue;
 import carpet.script.value.Value;
+import carpet.script.value.ValueConversions;
 import com.google.common.collect.Sets;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import net.minecraft.command.argument.ItemStackArgument;
@@ -36,6 +37,7 @@ import net.minecraft.recipe.ShapedRecipe;
 import net.minecraft.recipe.ShapelessRecipe;
 import net.minecraft.recipe.SpecialCraftingRecipe;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.tag.TagManager;
 import net.minecraft.text.LiteralText;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
@@ -46,6 +48,7 @@ import net.minecraft.util.registry.Registry;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.stream.Collectors;
 
 public class Inventories {
     public static void apply(Expression expression)
@@ -64,6 +67,43 @@ public class Inventories {
             ItemGroup ig = item.getItem().getGroup();
             Value res = (ig==null)?Value.NULL:new StringValue(ig.getName());
             return (_c, _t) -> res;
+        });
+
+        expression.addLazyFunction("item_list", -1, (c, t, lv) ->
+        {
+            if (lv.size() == 0)
+            {
+                Value res = ListValue.wrap(Registry.ITEM.getIds().stream().map(ValueConversions::of).collect(Collectors.toList()));
+                return (cc, tt) -> res;
+            }
+            CarpetContext cc = (CarpetContext)c;
+            TagManager tagManager = cc.s.getMinecraftServer().getTagManager();
+            String tag = lv.get(0).evalValue(c).getString();
+            net.minecraft.tag.Tag<Item> itemTag = tagManager.getItems().getTag(new Identifier(tag));
+            if (itemTag == null) return LazyValue.NULL;
+            Value ret = ListValue.wrap(itemTag.values().stream().map(b -> ValueConversions.of(Registry.ITEM.getId(b))).collect(Collectors.toList()));
+            return (_c, _t) -> ret;
+        });
+
+        expression.addLazyFunction("item_tags", -1, (c, t, lv) ->
+        {
+            CarpetContext cc = (CarpetContext)c;
+            TagManager tagManager = cc.s.getMinecraftServer().getTagManager();
+            if (lv.size() == 0)
+            {
+                Value ret = ListValue.wrap(tagManager.getItems().getTagIds().stream().map(ValueConversions::of).collect(Collectors.toList()));
+                return (_c, _t) -> ret;
+            }
+            Item item = NBTSerializableValue.parseItem(lv.get(0).evalValue(c).getString()).getItem();
+            if (lv.size() == 1)
+            {
+                Value ret = ListValue.wrap(tagManager.getItems().getTagsFor(item).stream().map(ValueConversions::of).collect(Collectors.toList()));
+                return (_c, _t) -> ret;
+            }
+            String tag = lv.get(1).evalValue(c).getString();
+            net.minecraft.tag.Tag<Item> itemTag = tagManager.getItems().getTag(new Identifier(tag));
+            if (itemTag == null) return LazyValue.NULL;
+            return item.isIn(itemTag)?LazyValue.TRUE:LazyValue.FALSE;
         });
 
         expression.addLazyFunction("recipe_data", -1, (c, t, lv) ->

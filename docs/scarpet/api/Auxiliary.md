@@ -193,9 +193,10 @@ Other value types will only be converted to tags (including NBT tags) if `force`
 extra treatment when loading them back from NBT, but using `force` true will always produce output / never 
 produce an exception.
 
-### `print(expr)`
+### `print(expr)`, `print(player/player_list, expr)`
 
 Displays the result of the expression to the chat. Overrides default `scarpet` behaviour of sending everyting to stderr.
+Can optionally define player or list of players to send the message to.
 
 ### `format(components, ...)`, `format(l(components, ...))`
 
@@ -275,13 +276,15 @@ Available output types:
 ### `read_file(resource, type)`
 ### `delete_file(resource, type)`
 ### `write_file(resource, type, data, ...)`
+### `list_files(resource, type)`
 
 With the specified `resource` in the scripts folder, of a specific `type`, writes/appends `data` to it, reads its
- content, or deletes the resource.
+ content, deletes the resource, or lists other files under this resource.
 
 Resource is identified by a path to the file.  
 A path can contain letters, numbers, characters `-`, `+`, or `_`, and a folder separator: `'/'`. Any other characters are stripped
-from the name. Empty descriptors are invalid. Do not add file extensions to the descriptor - extensions are inferred
+from the name. Empty descriptors are invalid, except for `list_files` where it means the root folder.
+ Do not add file extensions to the descriptor - extensions are inferred
 based on the `type` of the file.
  
 Resources can be located in the app specific space, or a shared space for all the apps. Accessing of app-specific
@@ -296,33 +299,29 @@ specific data directory is under `world/scripts/foo.data/...`, and shared data s
 
 The default no-name app, via `/script run` command can only save/load/read files from the shared space.
 
-Functions return `null` if an error is encounter or no file is present (for read and delete operations). Returns `true`
-for success writes and deletes, and requested data, based on the file type, for read operations.
-
-NBT files can be written once as they an store one tag at a time. Consecutive writes will overwrite previous data.
-
-Write operations to text files always result in appending to the existing file, so consecutive writes will increase
-the size of the file and add data to it. Since files are closed after each write, sending multiple lines of data to
-write is beneficial for writing speed. To send multiple packs of data, either provide them flat or as a list in the
-third argument.
- * `write_file('temp', 'text', 'foo', 'bar', 'baz')` or
- * write_file('temp', 'text', l('foo', 'bar', 'baz'))
+Functions return `null` if an error is encounter or no file is present (for read, list and delete operations). Returns `true`
+for success writes and deletes, and requested data, based on the file type, for read operations. It returns list of files 
+for folder listing.
  
-To log a single line of string
- 
-Supported values for resource `type` is:
+Supported values for resource `type` are:
  * `nbt` - NBT tag
+ * `json` - JSON file
  * `text` - text resource with automatic newlines added
  * `raw` - text resource without implied newlines
- * `shared_nbt`, `shared_text`, `shared_raw` - shared versions of the above
+ * `folder` - for `list_files` only - indicating folder listing instead of files
+ * `shared_nbt`, `shared_text`, `shared_raw`, `shared_folder`, `shared_json` - shared versions of the above
  
-NBT files have extension `.nbt`, store one NBT tag, and return a NBT type value. Text files have `.txt` extension, 
+NBT files have extension `.nbt`, store one NBT tag, and return a NBT type value. JSON files have `.json` extension, store 
+Scarpet numbers, strings, lists, maps and `null` values. Anything else will be saved as a string (including NBT).  
+Text files have `.txt` extension, 
 stores multiple lines of text and returns lists of all lines from the file. With `write_file`, multiple lines can be
 sent to the file at once. The only difference between `raw` and `text` types are automatic newlines added after each
-record to the file.
+record to the file. Since files are closed after each write, sending multiple lines of data to
+write is beneficial for writing speed. To send multiple packs of data, either provide them flat or as a list in the
+third argument.
 
 <pre>
-write_file('foo', 'shared_text, l('one', 'two'));
+write_file('foo', 'shared_text, ['one', 'two']);
 write_file('foo', 'shared_text', 'three\n', 'four\n');
 write_file('foo', 'shared_raw', 'five\n', 'six\n');
 
@@ -410,9 +409,24 @@ averaging.
 
 ### `game_tick(mstime?)`
 
-Causes game to run for one tick. By default runs it and returns control to the program, but can optionally 
-accept expected tick length, in milliseconds. You can't use it to permanently change the game speed, but setting 
-longer commands with custom tick speeds can be interrupted via `/script stop` command
+Causes game to run for one tick. By default, it runs it and returns control to the program, but can optionally 
+accept expected tick length, in milliseconds, waits that extra remaining time and then returns the control to the program.
+You can't use it to permanently change the game speed, but setting 
+longer commands with custom tick speeds can be interrupted via `/script stop` command - if you can get access to the 
+command terminal.
+
+Running `game_tick()` as part of the code that runs within the game tick itself is generally a bad idea, 
+unless you know what this entails. Triggering the `game_tick()` will cause the current (shoulder) tick to pause, then run the internal tick, 
+then run the rest of the shoulder tick, which may lead to artifacts in between regular code execution and your game simulation code.
+If you need to break
+up your execution into chunks, you could queue the rest of the work into the next task using `schedule`, or perform your actions
+defining `__on_tick()` event handler, but in case you need to take a full control over the game loop and run some simulations using 
+`game_tick()` as the way to advance the game progress, that might be the simplest way to do it, 
+and triggering the script in a 'proper' way (there is not 'proper' way, but via commmand line, or server chat is the most 'proper'),
+would be the safest way to do it. For instance, running `game_tick()` from a command block triggered with a button, or in an entity
+ event triggered in an entity tick, may technically
+cause the game to run and encounter that call again, causing stack to overflow. Thankfully it doesn't happen in vanilla running 
+carpet, but may happen with other modified (modded) versions of the game.
 
 <pre>
 loop(1000,game_tick())  // runs the game as fast as it can for 1000 ticks
@@ -449,6 +463,9 @@ algorithm has taken in to account last time mobs spawned.
 Schedules a user defined function to run with a specified `delay` ticks of delay. Scheduled functions run at the end 
 of the tick, and they will run in order they were scheduled.
 
+In case you want to schedule a function that is not defined in your module, please read the tips on
+ "Passing function references to other modules of your application" section in the `call(...)` section.
+
 ### `statistic(player, category, entry)`
 
 Queries in-game statistics for certain values. Categories include:
@@ -474,7 +491,7 @@ it could either mean your input is wrong, or statistic effectively has a value o
 ### `system_info()`, `system_info(property)`
 Fetches the value of a system property or returns all inforation as a map when called without any arguments. It can be used to 
 fetch various information, mostly not changing, or only available via low level
-system calls. In all cirumstances, these are only provided as read-only.
+system calls. In all circumstances, these are only provided as read-only.
 
 Available options in the scarpet app space:
   * `app_name` - current app name or `null` if its a default app
@@ -488,9 +505,11 @@ Available options in the scarpet app space:
   * `world_path` - full path to the world saves folder
   * `world_folder` - name of the direct folder in the saves that holds world files
   * `world_carpet_rules` - returns all Carpet rules in a map form (`rule`->`value`). Note that the values are always returned as strings, so you can't do boolean comparisons directly. Includes rules from extensions with their namespace (`namespace:rule`->`value`). You can later listen to rule changes with the `on_carpet_rule_changes(rule, newValue)` event.
- 
+  * `world_gamerules` - returns all gamerules in a map form (`rule`->`value`). Like carpet rules, values are returned as strings, so you can use appropriate value conversions using `bool()` or `number()` to convert them to other values. Gamerules are read-only to discourage app programmers to mess up with the settings intentionally applied by server admins. Isn't that just super annoying when a datapack messes up with your gamerule settings? It is still possible to change them though using `run('gamerule ...`.
+
+
  Relevant gameplay related properties
-  * `game_difficulty` - current difficulty of the game: `'peacefu'`, `'easy'`, `'normal'`, or `'hard'`
+  * `game_difficulty` - current difficulty of the game: `'peaceful'`, `'easy'`, `'normal'`, or `'hard'`
   * `game_hardcore` - boolean whether the game is in hardcore mode
   * `game_storage_format` - format of the world save files, either `'McRegion'` or `'Anvil'`
   * `game_default_gamemode` - default gamemode for new players
@@ -498,15 +517,16 @@ Available options in the scarpet app space:
   * `game_view_distance` - the view distance
   * `game_mod_name` - the name of the base mod. Expect `'fabric'`
   * `game_version` - base version of the game
+  * `game_data_version` - data version of the game. Returns an integer, so it can be compared.
   
  Server related properties
-
  * `server_motd` - the motd of the server visible when joining
  * `server_ip` - IP adress of the game hosted
  * `server_whitelisted` - boolean indicating whether the access to the server is only for whitelisted players
  * `server_whitelist` - list of players allowed to log in
  * `server_banned_players` - list of banned player names
  * `server_banned_ips` - list of banned IP addresses
+ * `server_dev_environment` - boolean indicating whether this server is in a development environment.
  
  System related properties
  * `java_max_memory` - maximum allowed memory accessible by JVM
@@ -517,3 +537,12 @@ Available options in the scarpet app space:
  * `java_bits` - number indicating how many bits the Java has, 32 or 64
  * `java_system_cpu_load` - current percentage of CPU used by the system
  * `java_process_cpu_load` - current percentage of CPU used by JVM
+ 
+ Scarpet related properties
+ * `scarpet_version` - returns the version of the carpet your scarpet comes with.
+
+## NBT Storage
+
+### `nbt_storage()`, `nbt_storage(key)`, `nbt_storage(key, nbt)`
+Displays or modifies individual storage NBT tags. With no arguments, returns the list of current NBT storages. With specified `key`, returns the `nbt` associated with current `key`, or `null` if storage does not exist. With specified `key` and `nbt`, sets a new `nbt` value, returning previous value associated with the `key`.
+NOTE: This NBT storage is shared with all vanilla datapacks and scripts of the entire server and is persistent between restarts and reloads. You can also access this NBT storage with vanilla `/data <get|modify|merge> storage <key> ...` command.
