@@ -546,7 +546,7 @@ public class Auxiliary {
             {
                 pVal = lv.get(2);
                 title = FormattedTextValue.getTextByValue(pVal);
-                soundsTrue = pVal.getBoolean();
+                soundsTrue = pVal.getBooddddddddddddddddddlean();
             }
             else title = null; // Will never happen, just to make lambda happy
             if (action == null)
