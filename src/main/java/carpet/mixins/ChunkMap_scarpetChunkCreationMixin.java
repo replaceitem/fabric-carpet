@@ -15,6 +15,7 @@ import java.util.stream.Collectors;
 import carpet.fakes.SimpleEntityLookupInterface;
 import carpet.fakes.ServerWorldInterface;
 import net.minecraft.Util;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.TickTask;
 import net.minecraft.server.level.ChunkHolder;
@@ -398,34 +399,8 @@ public abstract class ChunkMap_scarpetChunkCreationMixin implements ThreadedAnvi
         this.modified = true;
         this.promoteChunkMap();
 
-        // Remove light for affected neighbors
 
-        for (final ChunkAccess chunk : affectedNeighbors)
-            ((ServerLightingProviderInterface) this.lightEngine).removeLightData(chunk);
 
-        // Schedule relighting of neighbors
-
-        for (final ChunkAccess chunk : affectedNeighbors)
-            this.addRelightTicket(chunk.getPos());
-
-        this.tickTicketManager();
-
-        final List<CompletableFuture<?>> lightFutures = new ArrayList<>();
-
-        for (final ChunkAccess chunk : affectedNeighbors)
-        {
-            final ChunkPos pos = chunk.getPos();
-
-            lightFutures.add(this.getChunkRangeFuture (this.updatingChunkMap.get(pos.toLong()), 1, (pos_) -> ChunkStatus.LIGHT).thenCompose(
-                either -> either.map(
-                    list -> ((ServerLightingProviderInterface) this.lightEngine).relight(chunk),
-                    unloaded -> {
-                        this.releaseRelightTicket(pos);
-                        return CompletableFuture.completedFuture(null);
-                    }
-                )
-            ));
-        }
 
         // Force generation to previous states
         // This ensures that the world is in a consistent state after this method
@@ -465,15 +440,52 @@ public abstract class ChunkMap_scarpetChunkCreationMixin implements ThreadedAnvi
             if (futures == null)
                 continue;
 
-            report.put("layer_count_" + status.getName(), futures.size());
+            String statusName = BuiltInRegistries.CHUNK_STATUS.getKey(status).getPath();
+
+            report.put("layer_count_" + statusName, futures.size());
             final long start = System.currentTimeMillis();
 
             this.waitFor(futures);
 
-            report.put("layer_time_" + status.getName(), (int) (System.currentTimeMillis() - start));
+            report.put("layer_time_" + statusName, (int) (System.currentTimeMillis() - start));
         }
 
-        report.put("relight_count", lightFutures.size());
+
+
+
+
+        report.put("relight_count", affectedNeighbors.size());
+
+        // Remove light for affected neighbors
+
+        for (final ChunkAccess chunk : affectedNeighbors)
+            ((ServerLightingProviderInterface) this.lightEngine).removeLightData(chunk);
+
+        // Schedule relighting of neighbors
+
+        for (final ChunkAccess chunk : affectedNeighbors)
+            this.addRelightTicket(chunk.getPos());
+
+        this.tickTicketManager();
+
+        final List<CompletableFuture<?>> lightFutures = new ArrayList<>();
+
+        for (final ChunkAccess chunk : affectedNeighbors)
+        {
+            final ChunkPos pos = chunk.getPos();
+
+            lightFutures.add(this.getChunkRangeFuture (this.updatingChunkMap.get(pos.toLong()), 1, (pos_) -> ChunkStatus.LIGHT).thenCompose(
+                    either -> either.map(
+                            list -> ((ServerLightingProviderInterface) this.lightEngine).relight(chunk),
+                            unloaded -> {
+                                this.releaseRelightTicket(pos);
+                                return CompletableFuture.completedFuture(null);
+                            }
+                    )
+            ));
+        }
+
+
         final long relightStart = System.currentTimeMillis();
 
         this.waitFor(lightFutures);
