@@ -4,8 +4,10 @@ import carpet.fakes.ServerWorldInterface;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.core.RegistryAccess;
+import net.minecraft.core.particles.ParticleOptions;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.sounds.SoundEvent;
 import net.minecraft.util.profiling.ProfilerFiller;
 import net.minecraft.world.DifficultyInstance;
 import net.minecraft.world.damagesource.DamageSource;
@@ -25,6 +27,7 @@ import net.minecraft.world.level.storage.WritableLevelData;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
@@ -36,7 +39,6 @@ import java.util.function.Supplier;
 import static carpet.script.CarpetEventServer.Event.EXPLOSION;
 import static carpet.script.CarpetEventServer.Event.LIGHTNING;
 import static carpet.script.CarpetEventServer.Event.CHUNK_UNLOADED;
-
 
 @Mixin(ServerLevel.class)
 public abstract class ServerLevel_scarpetMixin extends Level implements ServerWorldInterface
@@ -64,7 +66,7 @@ public abstract class ServerLevel_scarpetMixin extends Level implements ServerWo
     }
 
     @Inject(method = "explode", at = @At("HEAD"))
-    private void handleExplosion(/*@Nullable*/ Entity entity, /*@Nullable*/ DamageSource damageSource, /*@Nullable*/ ExplosionDamageCalculator explosionBehavior, double d, double e, double f, float g, boolean bl, Level.ExplosionInteraction explosionInteraction, CallbackInfoReturnable<Explosion> cir)
+    private void handleExplosion(/*@Nullable*/ Entity entity, /*@Nullable*/ DamageSource damageSource, /*@Nullable*/ ExplosionDamageCalculator explosionBehavior, double d, double e, double f, float g, boolean bl, ExplosionInteraction explosionInteraction, ParticleOptions particleOptions, ParticleOptions particleOptions2, Holder<SoundEvent> soundEvent, CallbackInfoReturnable<Explosion> cir)
     {
         if (EXPLOSION.isNeeded()) {
             Explosion.BlockInteraction var10000 = switch (explosionInteraction) {
@@ -94,11 +96,13 @@ public abstract class ServerLevel_scarpetMixin extends Level implements ServerWo
     private ServerLevelData serverLevelData;
     @Shadow @Final private PersistentEntitySectionManager<Entity> entityManager;
 
+    @Unique
     @Override
     public ServerLevelData getWorldPropertiesCM(){
         return serverLevelData;
     }
 
+    @Unique
     @Override
     public LevelEntityGetter<Entity> getEntityLookupCMPublic() {
         return entityManager.getEntityGetter();

@@ -133,15 +133,12 @@ public class Auxiliary
             CarpetContext cc = (CarpetContext) c;
             if (lv.isEmpty())
             {
-                return ListValue.wrap(cc.registry(Registries.SOUND_EVENT).keySet().stream().map(ValueConversions::of));
+                return ListValue.wrap(cc.registry(Registries.SOUND_EVENT).holders().map(soundEventReference -> ValueConversions.of(soundEventReference.key().location())));
             }
             String rawString = lv.get(0).getString();
             ResourceLocation soundName = InputValidator.identifierOf(rawString);
             Vector3Argument locator = Vector3Argument.findIn(lv, 1);
-            if (cc.registry(Registries.SOUND_EVENT).get(soundName) == null)
-            {
-                throw new ThrowStatement(rawString, Throwables.UNKNOWN_SOUND);
-            }
+
             Holder<SoundEvent> soundHolder = Holder.direct(SoundEvent.createVariableRangeEvent(soundName));
             float volume = 1.0F;
             float pitch = 1.0F;
@@ -181,7 +178,7 @@ public class Auxiliary
             CarpetContext cc = (CarpetContext) c;
             if (lv.isEmpty())
             {
-                return ListValue.wrap(cc.registry(Registries.PARTICLE_TYPE).keySet().stream().map(ValueConversions::of));
+                return ListValue.wrap(cc.registry(Registries.PARTICLE_TYPE).holders().map(particleTypeReference -> ValueConversions.of(particleTypeReference.key().location())));
             }
             MinecraftServer ms = cc.server();
             ServerLevel world = cc.level();
@@ -690,12 +687,11 @@ public class Auxiliary
             {
                 Component[] error = {null};
                 List<Component> output = new ArrayList<>();
-                Value retval = new NumericValue(s.getServer().getCommands().performPrefixedCommand(
+                s.getServer().getCommands().performPrefixedCommand(
                         new SnoopyCommandSource(s, error, output),
-                        lv.get(0).getString())
-                );
+                        lv.get(0).getString());
                 return ListValue.of(
-                        retval,
+                        NumericValue.ZERO,
                         ListValue.wrap(output.stream().map(FormattedTextValue::new)),
                         FormattedTextValue.of(error[0])
                 );

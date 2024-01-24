@@ -26,17 +26,17 @@
     "ServerStatus_motdMixin",
     "MinecraftServer_pingPlayerSampleLimit",
     "HugeFungusFeatureMixin",
-
+    "PiglinBrute_getPlacementTypeMixin",
     "MinecraftServer_coreMixin",
 
     "MinecraftServer_tickspeedMixin",
     "Level_tickMixin",
     "ServerLevel_tickMixin",
-    "BoundTickingBlockEntity_tickMixin",
-    "ServerChunkCache_tickMixin",
-    "ChunkMap_tickMixin",
-    "ServerFunctionManager_tickMixin",
-    "WorldBorder_tickMixin",
+    "BoundTickingBlockEntity_profilerMixin",
+    "ServerChunkCache_profilerMixin",
+    "ChunkMap_profilerMixin",
+    "ServerFunctionManager_profilerMixin",
+    "WorldBorder_syncedWorldBorderMixin",
     "ChunkMap_scarpetChunkCreationMixin",
     "LevelEntityGetterAdapter_scarpetMixin",
     "ChunkHolder_scarpetChunkCreationMixin",
@@ -47,14 +47,12 @@
     "LayerLightEngine_scarpetChunkCreationMixin",
     "LayerLightSectionStorage_scarpetChunkCreationMixin",
     "DistanceManager_spawnChunksMixin",
-    "ServerLevel_spawnChunksMixin",
     "ThreadedLevelLightEngine_scarpetChunkCreationMixin",
     "LivingEntity_cleanLogsMixin",
     "MobMixin",
     "Villager_aiMixin",
     "Player_fakePlayersMixin",
     "ServerGamePacketListenerImpl_coreMixin",
-    "ServerGamePacketListenerImpl_tickMixin",
     "MinecraftServer_scarpetMixin",
     "ExperienceOrb_xpNoCooldownMixin",
     "Player_xpNoCooldownMixin",
@@ -118,7 +116,6 @@
     "PathNavigation_pathfindingMixin",
 
     "InfestedBlock_gravelMixin",
-    "Player_portalDelayMixin",
     "PistonBaseBlock_qcMixin",
     "DispenserBlock_qcMixin",
 
@@ -178,21 +175,19 @@
     "SculkSensorBlockEntityVibrationConfig_sculkSensorRangeMixin",
     "CollectingNeighborUpdaterAccessor",
 
-    "BlockBehaviour_customStickyMixin",
     "BlockBehaviourBlockStateBase_mixin",
     "ChainBlock_customStickyMixin",
     "ChestBlock_customStickyMixin",
-    "HoneyBlock_customStickyMixin",
     "PistonStructureResolver_customStickyMixin",
-    "SlimeBlock_customStickyMixin"
+
+    "CustomPacketPayload_networkStuffMixin",
+    "ServerCommonPacketListenerimpl_connectionMixin"
+
   ],
   "client": [
-    "ClientLevel_tickSpeedMixin",
+    "Minecraft_tickMixin",
     "ShulkerBoxAccessMixin",
-    "Timer_tickSpeedMixin",
     "MinecraftMixin",
-    "Minecraft_pausedShakeMixin",
-    "LevelRenderer_pausedShakeMixin",
     "Gui_tablistMixin",
     "PlayerTabOverlayMixin",
     "PistonHeadRenderer_movableBEMixin",
@@ -202,7 +197,10 @@
     "LevelRenderer_creativeNoClipMixin",
     "ClientPacketListener_customPacketsMixin",
     "DebugRenderer_scarpetRenderMixin",
-    "LevelRenderer_scarpetRenderMixin"
+    "LevelRenderer_scarpetRenderMixin",
+
+
+    "ClientCommonPacketListenerImpl_customPacketMixin"
   ],
   "injectors": {
     "defaultRequire": 1

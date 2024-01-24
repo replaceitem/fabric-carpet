@@ -3,7 +3,6 @@ package carpet.script.value;
 import carpet.script.exception.InternalExpressionException;
 import carpet.script.exception.ThrowStatement;
 import carpet.script.exception.Throwables;
-import carpet.script.external.Carpet;
 import carpet.script.external.Vanilla;
 import carpet.script.utils.Colors;
 import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
@@ -46,6 +45,7 @@ import net.minecraft.world.level.pathfinder.Path;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.scores.Objective;
+import net.minecraft.world.scores.ScoreHolder;
 import net.minecraft.world.scores.criteria.ObjectiveCriteria;
 
 import java.util.ArrayList;
@@ -91,7 +91,10 @@ public class ValueConversions
 
     public static <T extends Number> Value of(MinMaxBounds<T> range)
     {
-        return ListValue.of(NumericValue.of(range.getMin()), NumericValue.of(range.getMax()));
+        return ListValue.of(
+                range.min().map(NumericValue::of).orElse(Value.NULL),
+                range.max().map(NumericValue::of).orElse(Value.NULL)
+        );
     }
 
     @Deprecated
@@ -380,6 +383,11 @@ public class ValueConversions
         }
         ret.put(new StringValue("pieces"), ListValue.wrap(pieces));
         return MapValue.wrap(ret);
+    }
+
+    public static Value of(final ScoreHolder scoreHolder)
+    {
+        return FormattedTextValue.of(scoreHolder.getFeedbackDisplayName());
     }
 
     public static Value fromProperty(BlockState state, Property<?> p)

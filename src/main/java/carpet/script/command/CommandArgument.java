@@ -55,7 +55,7 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import net.minecraft.ChatFormatting;
-import net.minecraft.advancements.Advancement;
+import net.minecraft.advancements.AdvancementHolder;
 import net.minecraft.advancements.critereon.MinMaxBounds;
 import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
@@ -106,7 +106,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.storage.loot.LootDataType;
 import net.minecraft.world.phys.Vec2;
-import net.minecraft.world.scores.Scoreboard;
+import net.minecraft.world.scores.ScoreHolder;
 
 import javax.annotation.Nullable;
 
@@ -122,7 +122,7 @@ public abstract class CommandArgument
     private static final List<? extends CommandArgument> baseTypes = Lists.newArrayList(
             // default
             new StringArgument(),
-            // vanilla arguments as per https://minecraft.gamepedia.com/Argument_types
+            // vanilla arguments as per https://minecraft.wiki/w/Argument_types
             new VanillaUnconfigurableArgument("bool", BoolArgumentType::bool,
                     (c, p) -> BooleanValue.of(BoolArgumentType.getBool(c, p)), false
             ),
@@ -205,10 +205,10 @@ public abstract class CommandArgument
             // resource / identifier section
 
             new VanillaUnconfigurableArgument("recipe", ResourceLocationArgument::id,
-                    (c, p) -> ValueConversions.of(ResourceLocationArgument.getRecipe(c, p).getId()), SuggestionProviders.ALL_RECIPES
+                    (c, p) -> ValueConversions.of(ResourceLocationArgument.getRecipe(c, p).id()), SuggestionProviders.ALL_RECIPES
             ),
             new VanillaUnconfigurableArgument("advancement", ResourceLocationArgument::id,
-                    (c, p) -> ValueConversions.of(ResourceLocationArgument.getAdvancement(c, p).getId()), (ctx, builder) -> SharedSuggestionProvider.suggestResource(ctx.getSource().getServer().getAdvancements().getAllAdvancements().stream().map(Advancement::getId), builder)
+                    (c, p) -> ValueConversions.of(ResourceLocationArgument.getAdvancement(c, p).id()), (ctx, builder) -> SharedSuggestionProvider.suggestResource(ctx.getSource().getServer().getAdvancements().getAllAdvancements().stream().map(AdvancementHolder::id), builder)
             ),
             new VanillaUnconfigurableArgument("lootcondition", ResourceLocationArgument::id,
                     (c, p) -> ValueConversions.of(c.getSource().registryAccess().registryOrThrow(Registries.LOOT_CONDITION_TYPE).getKey(ResourceLocationArgument.getPredicate(c, p).getType())), (ctx, builder) -> SharedSuggestionProvider.suggestResource(ctx.getSource().getServer().getLootData().getKeys(LootDataType.PREDICATE), builder)
@@ -259,7 +259,7 @@ public abstract class CommandArgument
             ),
             new ScoreholderArgument(),
             new VanillaUnconfigurableArgument("scoreboardslot", ScoreboardSlotArgument::displaySlot,
-                    (c, p) -> StringValue.of(Scoreboard.getDisplaySlotName(ScoreboardSlotArgument.getDisplaySlot(c, p))), false
+                    (c, p) -> StringValue.of(ScoreboardSlotArgument.getDisplaySlot(c, p).getSerializedName()), false
             ),
             new VanillaUnconfigurableArgument("swizzle", SwizzleArgument::swizzle,
                     (c, p) -> StringValue.of(SwizzleArgument.getSwizzle(c, p).stream().map(Direction.Axis::getSerializedName).collect(Collectors.joining())), true
@@ -778,10 +778,10 @@ public abstract class CommandArgument
         @Override
         protected Value getValueFromContext(CommandContext<CommandSourceStack> context, String param) throws CommandSyntaxException
         {
-            Collection<String> holders = ScoreHolderArgument.getNames(context, param);
+            Collection<ScoreHolder> holders = ScoreHolderArgument.getNames(context, param);
             if (!single)
             {
-                return ListValue.wrap(holders.stream().map(StringValue::of));
+                return ListValue.wrap(holders.stream().map(ValueConversions::of));
             }
             int size = holders.size();
             if (size == 0)
@@ -790,7 +790,7 @@ public abstract class CommandArgument
             }
             if (size == 1)
             {
-                return StringValue.of(holders.iterator().next());
+                return ValueConversions.of(holders.iterator().next());
             }
             throw new SimpleCommandExceptionType(Component.literal("Multiple score holders returned while only one was requested" + " for custom type " + suffix)).create();
         }

@@ -183,6 +183,7 @@ public class Vanilla
         return CarpetSettings.runPermissionLevel;
     }
 
+    @Deprecated
     public static String MinecraftServer_getReleaseTarget(MinecraftServer server)
     {
         return CarpetSettings.releaseTarget;
@@ -230,7 +231,7 @@ public class Vanilla
 
     public static String ServerPlayer_getLanguage(ServerPlayer player)
     {
-        return ((ServerPlayerInterface) player).getLanguage();
+        return player.clientInformation().language();
     }
 
     public static GoalSelector Mob_getAI(Mob mob, boolean target)
@@ -345,7 +346,7 @@ public class Vanilla
 
     public static int MinecraftServer_getFillLimit(MinecraftServer server)
     {
-        return Math.max(server.getGameRules().getInt(GameRules.RULE_COMMAND_MODIFICATION_BLOCK_LIMIT), CarpetSettings.fillLimit);
+        return server.getGameRules().getInt(GameRules.RULE_COMMAND_MODIFICATION_BLOCK_LIMIT);
     }
 
     public static int PoiRecord_getFreeTickets(PoiRecord record)
@@ -365,5 +366,4 @@ public class Vanilla
             return new BlockPredicatePayload(predicateData.getCMBlockState(), predicateData.getCMBlockTagKey(), predicateData.getCMProperties(), predicateData.getCMDataTag());
         }
     }
-
 }

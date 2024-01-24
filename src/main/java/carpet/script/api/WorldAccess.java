@@ -38,6 +38,7 @@ import net.minecraft.core.Holder;
 import net.minecraft.core.HolderSet;
 import net.minecraft.core.QuartPos;
 import net.minecraft.core.Registry;
+import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
@@ -46,6 +47,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.level.Ticket;
 import net.minecraft.server.level.TicketType;
+import net.minecraft.sounds.SoundEvents;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.level.chunk.ChunkGenerator;
 import net.minecraft.world.level.chunk.PalettedContainer;
@@ -56,6 +58,7 @@ import net.minecraft.world.level.levelgen.NoiseRouter;
 import net.minecraft.world.level.levelgen.RandomState;
 import net.minecraft.world.level.levelgen.structure.Structure;
 import net.minecraft.world.level.levelgen.structure.StructureType;
+import org.apache.commons.lang3.mutable.MutableBoolean;
 import org.apache.commons.lang3.tuple.Pair;
 
 import java.util.ArrayList;
@@ -896,7 +899,7 @@ public class WorldAccess
             }
             world.levelEvent(null, 2001, where, Block.getId(state));
 
-            boolean toolBroke = false;
+            final MutableBoolean toolBroke = new MutableBoolean(false);
             boolean dropLoot = true;
             if (playerBreak)
             {
@@ -912,7 +915,8 @@ public class WorldAccess
                 {
                     damageAmount = 2;
                 }
-                toolBroke = damageAmount > 0 && tool.hurt(damageAmount, world.getRandom(), null);
+                final int finalDamageAmount = damageAmount;
+                tool.hurtAndBreak(damageAmount, world.getRandom(), null, () ->  { if (finalDamageAmount > 0) toolBroke.setTrue(); } );
                 if (!isUsingEffectiveTool)
                 {
                     dropLoot = false;
@@ -929,7 +933,7 @@ public class WorldAccess
                 {
                     if (how > 0)
                     {
-                        tool.enchant(Enchantments.BLOCK_FORTUNE, (int) how);
+                        tool.enchant(Enchantments.FORTUNE, (int) how);
                     }
                     if (DUMMY_ENTITY == null)
                     {
@@ -942,7 +946,7 @@ public class WorldAccess
             {
                 return Value.TRUE;
             }
-            if (toolBroke)
+            if (toolBroke.booleanValue())
             {
                 return Value.NULL;
             }
@@ -1066,7 +1070,7 @@ public class WorldAccess
             float thePowah = powah;
 
             // copy of ServerWorld.createExplosion #TRACK#
-            Explosion explosion = new Explosion(cc.level(), source, null, null, pos.x, pos.y, pos.z, powah, createFire, mode)
+            Explosion explosion = new Explosion(cc.level(), source, null, null, pos.x, pos.y, pos.z, powah, createFire, mode,  ParticleTypes.EXPLOSION, ParticleTypes.EXPLOSION_EMITTER, SoundEvents.GENERIC_EXPLODE)
             {
                 @Override
                 @Nullable
@@ -1082,10 +1086,11 @@ public class WorldAccess
             {
                 explosion.clearToBlow();
             }
+            Explosion.BlockInteraction finalMode = mode;
             cc.level().players().forEach(spe -> {
                 if (spe.distanceToSqr(pos) < 4096.0D)
                 {
-                    spe.connection.send(new ClientboundExplodePacket(pos.x, pos.y, pos.z, thePowah, explosion.getToBlow(), explosion.getHitPlayers().get(spe)));
+                    spe.connection.send(new ClientboundExplodePacket(pos.x, pos.y, pos.z, thePowah, explosion.getToBlow(), explosion.getHitPlayers().get(spe), finalMode, ParticleTypes.EXPLOSION, ParticleTypes.EXPLOSION_EMITTER, SoundEvents.GENERIC_EXPLODE));
                 }
             });
             return Value.TRUE;
@@ -1225,7 +1230,7 @@ public class WorldAccess
             Registry<Block> blocks = cc.registry(Registries.BLOCK);
             if (lv.isEmpty())
             {
-                return ListValue.wrap(blocks.keySet().stream().map(ValueConversions::of));
+                return ListValue.wrap(blocks.holders().map(blockReference -> ValueConversions.of(blockReference.key().location())));
             }
             ResourceLocation tag = InputValidator.identifierOf(lv.get(0).getString());
             Optional<HolderSet.Named<Block>> tagset = blocks.getTag(TagKey.create(Registries.BLOCK, tag));
@@ -1256,7 +1261,7 @@ public class WorldAccess
             ServerLevel world = cc.level();
             if (lv.isEmpty())
             {
-                return ListValue.wrap(world.registryAccess().registryOrThrow(Registries.BIOME).keySet().stream().map(ValueConversions::of));
+                return ListValue.wrap(cc.registry(Registries.BIOME).holders().map(biomeReference -> ValueConversions.of(biomeReference.key().location())));
             }
 
             Biome biome;

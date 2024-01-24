@@ -27,25 +27,22 @@ import net.minecraft.server.bossevents.CustomBossEvent;
 import net.minecraft.server.bossevents.CustomBossEvents;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.BossEvent;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.scores.DisplaySlot;
 import net.minecraft.world.scores.Objective;
 import net.minecraft.world.scores.PlayerTeam;
-import net.minecraft.world.scores.Score;
+import net.minecraft.world.scores.ScoreAccess;
+import net.minecraft.world.scores.ScoreHolder;
 import net.minecraft.world.scores.Scoreboard;
 import net.minecraft.world.scores.Team;
 import net.minecraft.world.scores.criteria.ObjectiveCriteria;
 
 public class Scoreboards
 {
-    private static String getScoreboardKeyFromValue(Value keyValue)
+    private static ScoreHolder getScoreboardKeyFromValue(Value keyValue)
     {
-        if (keyValue instanceof final EntityValue ev)
-        {
-            Entity e = ev.getEntity();
-            return e instanceof Player ? e.getName().getString() : e.getStringUUID();
-        }
-        return keyValue.getString();
+        return keyValue instanceof EntityValue ev
+                ? ev.getEntity()
+                : ScoreHolder.forNameOnly(keyValue.getString());
     }
 
     public static void apply(Expression expression)
@@ -61,35 +58,36 @@ public class Scoreboards
                 return ListValue.wrap(scoreboard.getObjectiveNames().stream().map(StringValue::new));
             }
             String objectiveName = lv.get(0).getString();
-            Objective objective = scoreboard.getOrCreateObjective(objectiveName);
+            Objective objective = scoreboard.getObjective(objectiveName);
             if (objective == null)
             {
                 return Value.NULL;
             }
             if (lv.size() == 1)
             {
-                return ListValue.wrap(scoreboard.getPlayerScores(objective).stream().map(s -> new StringValue(s.getOwner())));
+                return ListValue.wrap(scoreboard.listPlayerScores(objective).stream().map(s -> new StringValue(s.owner())));
             }
-            String key = getScoreboardKeyFromValue(lv.get(1));
+            ScoreHolder key = getScoreboardKeyFromValue(lv.get(1));
             if (lv.size() == 2)
             {
-                return !scoreboard.hasPlayerScore(key, objective)
+                return scoreboard.getPlayerScoreInfo(key, objective) == null
                         ? Value.NULL
-                        : NumericValue.of(scoreboard.getOrCreatePlayerScore(key, objective).getScore());
+                        : NumericValue.of(scoreboard.getOrCreatePlayerScore(key, objective).get());
             }
 
             Value value = lv.get(2);
             if (value.isNull())
             {
-                Score score = scoreboard.getOrCreatePlayerScore(key, objective);
-                scoreboard.resetPlayerScore(key, objective);
-                return NumericValue.of(score.getScore());
+                int score = scoreboard.getOrCreatePlayerScore(key, objective).get();
+                scoreboard.resetSinglePlayerScore(key, objective);
+                return NumericValue.of(score);
             }
             if (value instanceof NumericValue)
             {
-                Score score = scoreboard.getOrCreatePlayerScore(key, objective);
-                score.setScore(NumericValue.asNumber(value).getInt());
-                return NumericValue.of(score.getScore());
+                ScoreAccess score = scoreboard.getOrCreatePlayerScore(key, objective);
+                int previous = score.get();
+                score.set(NumericValue.asNumber(value).getInt());
+                return NumericValue.of(previous);
             }
             throw new InternalExpressionException("'scoreboard' requires a number or null as the third parameter");
         });
@@ -103,7 +101,7 @@ public class Scoreboards
             CarpetContext cc = (CarpetContext) c;
             Scoreboard scoreboard = cc.server().getScoreboard();
             String objectiveName = lv.get(0).getString();
-            Objective objective = scoreboard.getOrCreateObjective(objectiveName);
+            Objective objective = scoreboard.getObjective(objectiveName);
             if (objective == null)
             {
                 return Value.FALSE;
@@ -113,14 +111,14 @@ public class Scoreboards
                 scoreboard.removeObjective(objective);
                 return Value.TRUE;
             }
-            String key = getScoreboardKeyFromValue(lv.get(1));
-            if (!scoreboard.hasPlayerScore(key, objective))
+            ScoreHolder key = getScoreboardKeyFromValue(lv.get(1));
+            if (scoreboard.getPlayerScoreInfo(key, objective) == null)
             {
                 return Value.NULL;
             }
-            Score scoreboardPlayerScore = scoreboard.getOrCreatePlayerScore(key, objective);
-            Value previous = new NumericValue(scoreboardPlayerScore.getScore());
-            scoreboard.resetPlayerScore(key, objective);
+            ScoreAccess scoreboardPlayerScore = scoreboard.getOrCreatePlayerScore(key, objective);
+            Value previous = new NumericValue(scoreboardPlayerScore.get());
+            scoreboard.resetSinglePlayerScore(key, objective);
             return previous;
         });
 
@@ -151,7 +149,7 @@ public class Scoreboards
                 }
             }
 
-            Objective objective = scoreboard.getOrCreateObjective(objectiveName);
+            Objective objective = scoreboard.getObjective(objectiveName);
             if (objective != null)
             {
                 c.host.issueDeprecation("reading or modifying an objective's criterion with scoreboard_add");
@@ -169,7 +167,7 @@ public class Scoreboards
                 scoreboard.onObjectiveAdded(objective);
                 return Value.FALSE;
             }
-            scoreboard.addObjective(objectiveName, criterion, Component.literal(objectiveName), criterion.getDefaultRenderType());
+            scoreboard.addObjective(objectiveName, criterion, Component.literal(objectiveName), criterion.getDefaultRenderType(), false, null);
             return Value.TRUE;
         });
 
@@ -181,7 +179,7 @@ public class Scoreboards
             }
             CarpetContext cc = (CarpetContext) c;
             Scoreboard scoreboard = cc.server().getScoreboard();
-            Objective objective = scoreboard.getOrCreateObjective(lv.get(0).getString());
+            Objective objective = scoreboard.getObjective(lv.get(0).getString());
             if (objective == null)
             {
                 return Value.NULL;
@@ -228,25 +226,24 @@ public class Scoreboards
                 case "display_slot" -> {
                     if (modify)
                     {
-                        int slotId = Scoreboard.getDisplaySlotByName(setValue.getString());
-                        if (slotId == -1)
+                        DisplaySlot slot =  DisplaySlot.CODEC.byName(setValue.getString());
+                        if (slot == null)
                         {
                             throw new InternalExpressionException("Unknown scoreboard display slot: " + setValue.getString());
                         }
-                        if (objective.equals(scoreboard.getDisplayObjective(slotId)))
+                        if (objective.equals(scoreboard.getDisplayObjective(slot)))
                         {
                             return Value.FALSE;
                         }
-                        scoreboard.setDisplayObjective(slotId, objective);
+                        scoreboard.setDisplayObjective(slot, objective);
                         return Value.TRUE;
                     }
                     List<Value> slots = new ArrayList<>();
-                    for (int i = 0; i < 19; i++)
+                    for (DisplaySlot slot : DisplaySlot.values())
                     {
-                        if (scoreboard.getDisplayObjective(i) == objective)
+                        if (scoreboard.getDisplayObjective(slot) == objective)
                         {
-                            String slotName = Scoreboard.getDisplaySlotName(i);
-                            slots.add(StringValue.of(slotName));
+                            slots.add(StringValue.of(slot.getSerializedName()));
                         }
                     }
                     return ListValue.wrap(slots);
@@ -273,8 +270,8 @@ public class Scoreboards
             CarpetContext cc = (CarpetContext) c;
             Scoreboard scoreboard = cc.server().getScoreboard();
             String location = lv.get(0).getString();
-            int slot = Scoreboard.getDisplaySlotByName(location);
-            if (slot < 0)
+            DisplaySlot slot = DisplaySlot.CODEC.byName(location);
+            if (slot == null)
             {
                 throw new InternalExpressionException("Invalid objective slot: " + location);
             }
@@ -282,16 +279,16 @@ public class Scoreboards
             if (target.isNull())
             {
                 scoreboard.setDisplayObjective(slot, null);
-                return new NumericValue(slot);
+                return StringValue.of(slot.getSerializedName());
             }
             String objectiveString = target.getString();
-            Objective objective = scoreboard.getOrCreateObjective(objectiveString);
+            Objective objective = scoreboard.getObjective(objectiveString);
             if (objective == null)
             {
                 return Value.NULL;
             }
             scoreboard.setDisplayObjective(slot, objective);
-            return new NumericValue(slot);
+            return StringValue.of(slot.getSerializedName());
         });
 
         expression.addContextFunction("team_list", -1, (c, t, lv) ->

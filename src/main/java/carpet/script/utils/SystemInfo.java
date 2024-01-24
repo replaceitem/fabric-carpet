@@ -59,10 +59,7 @@ public class SystemInfo
             return StringValue.of(tlf);
         });
         put("world_dimensions", c -> ListValue.wrap(c.server().levelKeys().stream().map(k -> ValueConversions.of(k.location()))));
-        put("world_spawn_point", c -> {
-            LevelData prop = c.server().overworld().getLevelData();
-            return ListValue.of(NumericValue.of(prop.getXSpawn()), NumericValue.of(prop.getYSpawn()), NumericValue.of(prop.getZSpawn()));
-        });
+        put("world_spawn_point", c -> ValueConversions.of(c.server().overworld().getLevelData().getSpawnPos()));
 
         put("world_bottom", c -> new NumericValue(c.level().getMinBuildHeight()));
 
@@ -134,7 +131,7 @@ public class SystemInfo
             // might be off one tick when run in the off tasks or asynchronously.
             int currentReportedTick = c.server().getTickCount() - 1;
             List<Value> ticks = new ArrayList<>(100);
-            long[] tickArray = c.server().tickTimes;
+            long[] tickArray = c.server().getTickTimesNanos();
             for (int i = currentReportedTick + 100; i > currentReportedTick; i--)
             {
                 ticks.add(new NumericValue((tickArray[i % 100]) / 1000000.0));

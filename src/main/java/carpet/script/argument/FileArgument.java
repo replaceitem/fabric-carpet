@@ -435,7 +435,7 @@ public class FileArgument
     {
         try
         {
-            return NbtIo.readCompressed(Files.newInputStream(path));
+            return NbtIo.readCompressed(Files.newInputStream(path), NbtAccounter.unlimitedHeap());
         }
         catch (IOException e)
         {
@@ -461,7 +461,7 @@ public class FileArgument
                     else
                     {
                         dataInputStream.readUTF();
-                        return TagTypes.getType(b).load(dataInputStream, 0, NbtAccounter.UNLIMITED);
+                        return TagTypes.getType(b).load(dataInputStream, NbtAccounter.unlimitedHeap());
                     }
                 }
                 catch (IOException secondIO)

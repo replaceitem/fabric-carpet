@@ -293,13 +293,12 @@ public class PlayerCommand
             Messenger.m(source, "rb Player " + playerName + " cannot be placed outside of the world");
             return 0;
         }
-        Player player = EntityPlayerMPFake.createFake(playerName, source.getServer(), pos, facing.y, facing.x, dimType, mode, flying);
-        if (player == null)
-        {
+        boolean success = EntityPlayerMPFake.createFake(playerName, source.getServer(), pos, facing.y, facing.x, dimType, mode, flying);
+        if (!success) {
             Messenger.m(source, "rb Player " + playerName + " doesn't exist and cannot spawn in online mode. " +
-                    "Turn the server offline to spawn non-existing players");
+                    "Turn the server offline or the allowSpawningOfflinePlayers on to spawn non-existing players");
             return 0;
-        }
+        };
         return 1;
     }
 
